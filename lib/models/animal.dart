@@ -56,6 +56,7 @@ class Animal {
   final List<VaccineRecord>? vaccinations; // Lista de registros de vacunas
   final bool? isPregnant; // ¿Está preñada? (Solo para hembras)
   final DateTime? pregnancyDate; // Fecha de preñez (Solo si isPregnant es true)
+  final String? purpose;
 
   Animal({
     required this.id,
@@ -83,6 +84,7 @@ class Animal {
     this.vaccinations, // Añadido al constructor
     this.isPregnant, // Añadido al constructor
     this.pregnancyDate, // Añadido al constructor
+    this.purpose,
   });
 
   factory Animal.fromFirestore(Map<String, dynamic> data, String id) {
@@ -160,6 +162,7 @@ class Animal {
       description: data['description'] as String?,
       price: (data['price'] as num?)?.toDouble(),
       profileImageUrl: data['profileImageUrl'] as String?,
+      purpose: data['purpose'] as String?,
 
       // Mapeo de nuevos campos
       vaccinations: parsedVaccinations.isEmpty
@@ -202,6 +205,7 @@ class Animal {
       if (isPregnant != null) 'isPregnant': isPregnant,
       if (pregnancyDate != null)
         'pregnancyDate': Timestamp.fromDate(pregnancyDate!),
+      if (purpose != null) 'purpose': purpose,
     };
   }
 }

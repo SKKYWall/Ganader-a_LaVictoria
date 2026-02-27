@@ -575,6 +575,7 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
                     _buildDetailRow('Número de Pierna', _animal!.legNumber),
                     _buildDetailRow(
                         'Número de Registro', _animal!.registrationNumber),
+                    _buildDetailRow('Propósito', _animal!.purpose),
                   ],
                 ),
               ),

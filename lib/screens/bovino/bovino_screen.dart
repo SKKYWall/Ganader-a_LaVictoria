@@ -486,6 +486,7 @@ class _BovinoScreenState extends State<BovinoScreen> {
                     // MODIFICACIÓN: Mostrar Fecha de Nacimiento en lugar de Edad
                     _buildInfoRow('Fecha de Nacimiento',
                         _formatDateTime(animal.birthDate)),
+                    _buildInfoRow('Propósito', animal.purpose),
                   ],
                 ),
               ),

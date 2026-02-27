@@ -60,6 +60,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
   // Variables para Dropdowns
   String? _selectedSex; // 'Macho' o 'Hembra'
   String? _selectedBreed; // Nueva variable para la raza seleccionada
+  String? _selectedPurpose;
 
   // Lista de razas comunes de bovinos
   final List<String> _bovineBreeds = [
@@ -82,6 +83,14 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
     'Texas Longhorn',
     'Cebú',
     'Otro', // Opción para razas no listadas
+  ];
+
+  final List<String> _purposes = [
+    'Leche',
+    'Carne',
+    'Genética',
+    'Engorda',
+    'Reproductora'
   ];
 
   File? _profileImageFile; // Para almacenar el archivo de imagen seleccionado
@@ -333,6 +342,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
         vaccinations: vaccinationsData, // Guardar vacunas
         isPregnant: isPregnantData, // Guardar estado de preñez
         pregnancyDate: pregnancyDateData, // Guardar fecha de preñez
+        purpose: _selectedPurpose,
       );
 
       await _firestore
@@ -708,6 +718,20 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                             }
                             return null;
                           },
+                        ),
+                        _buildFancyDropdownField(
+                          label: 'Propósito *',
+                          icon: FontAwesomeIcons.bullseye,
+                          value: _selectedPurpose,
+                          items: _purposes,
+                          onChanged: (String? newValue) {
+                            setState(() {
+                              _selectedPurpose = newValue;
+                            });
+                          },
+                          validator: (value) => value == null || value.isEmpty
+                              ? 'Selecciona el propósito'
+                              : null,
                         ),
                         _buildFancyDateFormField(
                           controller: _birthDateController,

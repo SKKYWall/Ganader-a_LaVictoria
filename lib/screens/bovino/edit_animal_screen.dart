@@ -31,6 +31,14 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
       TextEditingController(); // Número de Pierna
   String? _selectedSex; // 'Hembra' o 'Macho'
   String? _selectedBreed; // Variable para la raza seleccionada (para dropdown)
+  String? _selectedPurpose;
+  final List<String> _purposes = [
+    'Leche',
+    'Carne',
+    'Genética',
+    'Engorda',
+    'Reproductora'
+  ];
   final TextEditingController _fatherController = TextEditingController();
   final TextEditingController _motherController = TextEditingController();
   final TextEditingController _geneticMarkersController =
@@ -156,6 +164,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
           _selectedBreed = _animal!
               .breed; // Cargar raza en la variable de estado para el dropdown
           _selectedSex = _animal!.sex;
+          _selectedPurpose = _animal!.purpose;
           _fatherController.text = _animal!.father ?? '';
           _motherController.text = _animal!.mother ?? '';
           _geneticMarkersController.text = _animal!.geneticMarkers ?? '';
@@ -431,6 +440,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
         'pregnancyDate': pregnancyDateData != null
             ? Timestamp.fromDate(pregnancyDateData)
             : null,
+        'purpose': _selectedPurpose,
       };
 
       await _firestore
@@ -865,6 +875,20 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                           controller: _registrationNumberController,
                           label: 'Número de registro',
                           icon: Icons.app_registration,
+                        ),
+                        _buildFancyDropdownField(
+                          label: 'Propósito *',
+                          icon: FontAwesomeIcons.bullseye,
+                          value: _selectedPurpose,
+                          items: _purposes,
+                          onChanged: (String? newValue) {
+                            setState(() {
+                              _selectedPurpose = newValue;
+                            });
+                          },
+                          validator: (value) => value == null || value.isEmpty
+                              ? 'Selecciona el propósito'
+                              : null,
                         ),
                       ],
                     ),
