@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manual_ganadero_flutter/screens/profile/ranch_setup_screen.dart'; // Ajusta la ruta
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -30,20 +31,54 @@ class _LoginScreenState extends State<LoginScreen> {
         _isLoading = true;
       });
       try {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
+        // 1. Iniciamos sesión
+        UserCredential userCredential =
+            await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
-        // Si el inicio de sesión es exitoso, navega al dashboard
-        Navigator.of(context).pushReplacementNamed('/dashboard');
-      } on FirebaseAuthException catch (e) {
-        String errorMessage = 'Error al iniciar sesión. Inténtalo de nuevo.';
-        if (e.code == 'user-not-found' || e.code == 'wrong-password') {
-          errorMessage = 'Correo electrónico o contraseña incorrectos.';
-        } else if (e.code == 'invalid-email') {
-          errorMessage = 'El correo electrónico no es válido.';
+
+        // 2. Verificamos en Firebase si ya completó su perfil (Ranch Setup)
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .get();
+
+        if (userDoc.exists &&
+            (userDoc.data() as Map<String, dynamic>)['setupCompleted'] ==
+                true) {
+          // Si ya configuró su rancho, va directo al Dashboard
+          if (mounted) Navigator.of(context).pushReplacementNamed('/dashboard');
+        } else {
+          // Si NO lo ha configurado, lo mandamos a la pantalla de configuración
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const RanchSetupScreen()),
+            );
+          }
         }
-        _showErrorDialog(errorMessage);
+      } on FirebaseAuthException catch (e) {
+        String errorMessage = 'Error al iniciar sesión.';
+        if (e.code == 'user-not-found') {
+          errorMessage = 'No se encontró un usuario con ese correo.';
+        } else if (e.code == 'wrong-password') {
+          errorMessage = 'Contraseña incorrecta.';
+        } else if (e.code == 'invalid-email') {
+          errorMessage = 'El formato del correo es inválido.';
+        } else if (e.code == 'user-disabled') {
+          errorMessage = 'Esta cuenta ha sido deshabilitada.';
+        } else if (e.code == 'invalid-credential') {
+          errorMessage =
+              'Credenciales inválidas. Verifica tu correo y contraseña.';
+        }
+        if (mounted) {
+          _showAlert('Error', errorMessage);
+        }
+      } catch (e) {
+        if (mounted) {
+          _showAlert('Error', 'Ocurrió un error inesperado: $e');
+        }
       } finally {
         if (mounted) {
           setState(() {
@@ -64,36 +99,43 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() {
           _isLoading = false;
         });
-        return; // El usuario canceló el inicio de sesión de Google.
+        return; // El usuario canceló el inicio de sesión
       }
+
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
-      final OAuthCredential credential = GoogleAuthProvider.credential(
+      final AuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
-      await FirebaseAuth.instance.signInWithCredential(credential);
-      // Aquí podrías crear/actualizar el documento de usuario en Firestore si es necesario
-      final User? user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
-            {
-              'uid': user.uid,
-              'email': user.email ?? '',
-              'displayName': user.displayName ?? 'Usuario Google',
-              'photoURL': user.photoURL,
-            },
-            SetOptions(
-                merge:
-                    true)); // Usa merge para no sobrescribir datos existentes
+
+      // 1. Iniciar sesión con Google en Firebase
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+
+      // 2. Verificamos en Firebase si ya completó su perfil
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .get();
+
+      if (userDoc.exists &&
+          (userDoc.data() as Map<String, dynamic>)['setupCompleted'] == true) {
+        // Si ya configuró su rancho, va al Dashboard
+        if (mounted) Navigator.of(context).pushReplacementNamed('/dashboard');
+      } else {
+        // Si NO lo ha configurado, a la pantalla de configuración
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const RanchSetupScreen()),
+          );
+        }
       }
-      Navigator.of(context).pushReplacementNamed('/dashboard');
-    } catch (error) {
-      setState(() {
-        _isLoading = false;
-      });
-      print('Error signing in with Google: $error');
-      _showErrorDialog('Error al iniciar sesión con Google: $error');
+    } catch (e) {
+      if (mounted) {
+        _showAlert('Error', 'No se pudo iniciar sesión con Google: $e');
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -398,6 +440,27 @@ class _LoginScreenState extends State<LoginScreen> {
         padding: const EdgeInsets.all(
             10), // Padding interno para la imagen (ajustado para el nuevo tamaño)
         child: Image.asset(imagePath),
+      ),
+    );
+  }
+
+  // --- MÉTODO PARA MOSTRAR ALERTAS ---
+  void _showAlert(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Color(0xFF5e3a1c))),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Entendido',
+                style: TextStyle(
+                    color: Color(0xFFc99450), fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }

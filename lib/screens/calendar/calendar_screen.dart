@@ -278,6 +278,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
               event); // Evitar duplicados si un evento de la semana actual cae en el próximo mes
     }).toList();
 
+    // Filtrar eventos a futuro (más allá del próximo mes, como los partos)
+    List<CalendarEvent> futureEvents = allUpcomingEvents.where((event) {
+      return event.date
+          .isAfter(endOfNextMonth.add(const Duration(hours: 23, minutes: 59)));
+    }).toList();
+
     return Scaffold(
       backgroundColor: const Color(0xFFfbf6ec),
       appBar: AppBar(
@@ -426,6 +432,30 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     itemCount: nextMonthEvents.length,
                     itemBuilder: (context, index) {
                       final event = nextMonthEvents[index];
+                      return _buildEventCard(event);
+                    },
+                  ),
+
+            const SizedBox(height: 20.0),
+
+            // Sección: Eventos a Largo Plazo (Partos)
+            _buildSectionTitle('Eventos a Largo Plazo'),
+            futureEvents.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10.0),
+                      child: Text(
+                        'No hay eventos a largo plazo.',
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: futureEvents.length,
+                    itemBuilder: (context, index) {
+                      final event = futureEvents[index];
                       return _buildEventCard(event);
                     },
                   ),

@@ -3,13 +3,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart'; // Para formatear la fecha
-import 'package:manual_ganadero_flutter/models/animal.dart'; // Asegúrate de importar tu modelo Animal
-import 'package:image_picker/image_picker.dart'; // Importar para la selección de imágenes
-import 'dart:io'; // Para File
-import 'package:firebase_storage/firebase_storage.dart'; // Para Firebase Storage
-import 'package:flutter/services.dart'; // Para FilteringTextInputFormatter
-import 'package:font_awesome_flutter/font_awesome_flutter.dart'; // Para FontAwesomeIcons
+import 'package:intl/intl.dart';
+import 'package:manual_ganadero_flutter/models/animal.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class EditAnimalScreen extends StatefulWidget {
   final String animalId;
@@ -23,15 +23,32 @@ class EditAnimalScreen extends StatefulWidget {
 class _EditAnimalScreenState extends State<EditAnimalScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  // Controladores para los campos de texto
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _earTagNumberController =
-      TextEditingController(); // Número de Arete
-  final TextEditingController _legNumberController =
-      TextEditingController(); // Número de Pierna
-  String? _selectedSex; // 'Hembra' o 'Macho'
-  String? _selectedBreed; // Variable para la raza seleccionada (para dropdown)
+  final TextEditingController _earTagNumberController = TextEditingController();
+  final TextEditingController _legNumberController = TextEditingController();
+  final TextEditingController _registrationNumberController =
+      TextEditingController();
+  final TextEditingController _birthDateController = TextEditingController();
+  final TextEditingController _birthWeightController = TextEditingController();
+  final TextEditingController _weaningWeightController =
+      TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
+  final TextEditingController _fatherController = TextEditingController();
+  final TextEditingController _motherController = TextEditingController();
+  final TextEditingController _geneticMarkersController =
+      TextEditingController();
+  final TextEditingController _diseaseResistanceController =
+      TextEditingController();
+  final TextEditingController _fertilityInfoController =
+      TextEditingController();
+
+  String? _selectedSex;
+  String? _selectedBreed;
   String? _selectedPurpose;
+  bool _isPregnant = false;
+  final TextEditingController _pregnancyDateController =
+      TextEditingController();
+
   final List<String> _purposes = [
     'Leche',
     'Carne',
@@ -39,34 +56,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
     'Engorda',
     'Reproductora'
   ];
-  final TextEditingController _fatherController = TextEditingController();
-  final TextEditingController _motherController = TextEditingController();
-  final TextEditingController _geneticMarkersController =
-      TextEditingController();
-  final TextEditingController _birthWeightController = TextEditingController();
-  final TextEditingController _weaningWeightController =
-      TextEditingController();
-  final TextEditingController _diseaseResistanceController =
-      TextEditingController();
-  final TextEditingController _fertilityInfoController =
-      TextEditingController();
-  final TextEditingController _registrationNumberController =
-      TextEditingController();
-  final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _birthDateController =
-      TextEditingController(); // Controlador para fecha de nacimiento
-
-  // Nuevas variables para Vacunas y Preñez
-  final TextEditingController _vaccineNameController = TextEditingController();
-  final TextEditingController _vaccineDateController = TextEditingController();
-  List<VaccineRecord> _vaccineRecords = []; // Lista para almacenar las vacunas
-
-  bool _isPregnant = false; // Estado del switch de preñez
-  final TextEditingController _pregnancyDateController =
-      TextEditingController(); // Fecha de preñez
-
-  // Lista de razas comunes de bovinos
-  static const List<String> _bovineBreeds = [
+  final List<String> _breeds = [
     'Nelore',
     'Angus',
     'Brangus',
@@ -85,20 +75,16 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
     'Santa Gertrudis',
     'Texas Longhorn',
     'Cebú',
-    'Otro', // Opción para razas no listadas
+    'Otro',
   ];
 
-  Animal? _animal;
-  bool _isLoading = true;
-  bool _loading = false; // Para el botón de guardar
+  File? _imageFile;
+  String? _existingImageUrl;
+  bool _loading = true;
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseStorage _storage =
-      FirebaseStorage.instance; // Instancia de Firebase Storage
-
-  File?
-      _newProfileImageFile; // Nuevo archivo de imagen seleccionado (si se cambia)
-  String? _existingProfileImageUrl; // URL de la imagen existente
+  final FirebaseStorage _storage = FirebaseStorage.instance;
 
   @override
   void initState() {
@@ -111,173 +97,72 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
     _nameController.dispose();
     _earTagNumberController.dispose();
     _legNumberController.dispose();
+    _registrationNumberController.dispose();
+    _birthDateController.dispose();
+    _birthWeightController.dispose();
+    _weaningWeightController.dispose();
+    _descriptionController.dispose();
     _fatherController.dispose();
     _motherController.dispose();
     _geneticMarkersController.dispose();
-    _birthWeightController.dispose();
-    _weaningWeightController.dispose();
     _diseaseResistanceController.dispose();
     _fertilityInfoController.dispose();
-    _registrationNumberController.dispose();
-    _descriptionController.dispose();
-    _birthDateController.dispose();
-
-    _vaccineNameController.dispose();
-    _vaccineDateController.dispose();
-    _pregnancyDateController
-        .dispose(); // Dispose del controlador de fecha de preñez
-
+    _pregnancyDateController.dispose();
     super.dispose();
   }
 
   Future<void> _loadAnimalData() async {
     final user = _auth.currentUser;
-    if (user == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuario no autenticado.')),
-      );
-      setState(() {
-        _isLoading = false;
-      });
-      return;
-    }
-
-    try {
-      final docSnapshot = await _firestore
+    if (user != null) {
+      final doc = await _firestore
           .collection('users')
           .doc(user.uid)
           .collection('animals')
           .doc(widget.animalId)
           .get();
-
-      if (!mounted) return;
-      if (docSnapshot.exists && docSnapshot.data() != null) {
+      if (doc.exists && mounted) {
+        final animal = Animal.fromFirestore(doc.data()!, doc.id);
         setState(() {
-          _animal = Animal.fromFirestore(
-              docSnapshot.data() as Map<String, dynamic>, docSnapshot.id);
-
-          // Rellenar controladores con datos existentes
-          _nameController.text = _animal!.name;
-          _earTagNumberController.text = _animal!.earTagNumber;
-          _legNumberController.text = _animal!.legNumber;
-          _selectedBreed = _animal!
-              .breed; // Cargar raza en la variable de estado para el dropdown
-          _selectedSex = _animal!.sex;
-          _selectedPurpose = _animal!.purpose;
-          _fatherController.text = _animal!.father ?? '';
-          _motherController.text = _animal!.mother ?? '';
-          _geneticMarkersController.text = _animal!.geneticMarkers ?? '';
-          _birthWeightController.text = _animal!.birthWeight?.toString() ?? '';
-          _weaningWeightController.text =
-              _animal!.weaningWeight?.toString() ?? '';
-          _diseaseResistanceController.text = _animal!.diseaseResistance ?? '';
-          _fertilityInfoController.text = _animal!.fertilityInfo ?? '';
-          _registrationNumberController.text =
-              _animal!.registrationNumber ?? '';
-          _descriptionController.text = _animal!.description ?? '';
-
-          if (_animal!.birthDate != null) {
+          _nameController.text = animal.name;
+          _earTagNumberController.text = animal.earTagNumber;
+          _legNumberController.text = animal.legNumber ?? '';
+          _registrationNumberController.text = animal.registrationNumber ?? '';
+          _selectedSex = animal.sex;
+          _selectedBreed = animal.breed;
+          _selectedPurpose = animal.purpose;
+          if (animal.birthDate != null)
             _birthDateController.text =
-                DateFormat('dd/MM/yyyy').format(_animal!.birthDate!);
-          }
-          _existingProfileImageUrl = _animal!.profileImageUrl;
+                DateFormat('dd/MM/yyyy').format(animal.birthDate!);
+          _birthWeightController.text = animal.birthWeight?.toString() ?? '';
+          _weaningWeightController.text =
+              animal.weaningWeight?.toString() ?? '';
+          _descriptionController.text = animal.description ?? '';
+          _fatherController.text = animal.father ?? '';
+          _motherController.text = animal.mother ?? '';
+          _geneticMarkersController.text = animal.geneticMarkers ?? '';
+          _diseaseResistanceController.text = animal.diseaseResistance ?? '';
+          _fertilityInfoController.text = animal.fertilityInfo ?? '';
 
-          // Cargar datos de vacunas
-          _vaccineRecords = _animal!.vaccinations ?? [];
-
-          // Cargar datos de preñez
-          _isPregnant = _animal!.isPregnant ?? false;
-          if (_animal!.pregnancyDate != null) {
+          _existingImageUrl = animal.profileImageUrl;
+          _isPregnant = animal.isPregnant ?? false;
+          if (animal.pregnancyDate != null) {
             _pregnancyDateController.text =
-                DateFormat('dd/MM/yyyy').format(_animal!.pregnancyDate!);
+                DateFormat('dd/MM/yyyy').format(animal.pregnancyDate!);
           }
+          _loading = false;
         });
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Animal no encontrado.')),
-        );
-        Navigator.of(context).pop(); // Volver si no se encuentra
       }
-    } catch (e) {
-      print('Error loading animal data: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al cargar datos del animal: $e')),
-      );
-    } finally {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
-  Future<void> _selectBirthDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _animal?.birthDate ?? DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFFc99450), // Header background color
-              onPrimary: Colors.white, // Header text color
-              onSurface: Color(0xFF5e3a1c), // Body text color
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF6b4226), // Button text color
-              ),
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null && mounted) {
-      setState(() {
-        _birthDateController.text = DateFormat('dd/MM/yyyy').format(picked);
-      });
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: source, imageQuality: 70);
+    if (pickedFile != null && mounted) {
+      setState(() => _imageFile = File(pickedFile.path));
     }
   }
 
-  // Función para seleccionar fecha de vacuna
-  Future<void> _selectVaccineDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFFc99450),
-              onPrimary: Colors.white,
-              onSurface: Color(0xFF5e3a1c),
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF6b4226),
-              ),
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null && mounted) {
-      setState(() {
-        _vaccineDateController.text = DateFormat('dd/MM/yyyy').format(picked);
-      });
-    }
-  }
-
-  // Función para seleccionar fecha de preñez
   Future<void> _selectPregnancyDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -288,15 +173,9 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: const ColorScheme.light(
-              primary: Color(0xFFc99450),
-              onPrimary: Colors.white,
-              onSurface: Color(0xFF5e3a1c),
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF6b4226),
-              ),
-            ),
+                primary: Color(0xFFc99450),
+                onPrimary: Colors.white,
+                onSurface: Color(0xFF5e3a1c)),
           ),
           child: child!,
         );
@@ -309,236 +188,190 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
     }
   }
 
-  // Función para añadir una vacuna a la lista
-  void _addVaccine() {
-    if (_vaccineNameController.text.isNotEmpty &&
-        _vaccineDateController.text.isNotEmpty) {
+  Future<void> _selectBirthDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+                primary: Color(0xFFc99450),
+                onPrimary: Colors.white,
+                onSurface: Color(0xFF5e3a1c)),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && mounted) {
       setState(() {
-        _vaccineRecords.add(VaccineRecord(
-          name: _vaccineNameController.text.trim(),
-          date: DateFormat('dd/MM/yyyy')
-              .parse(_vaccineDateController.text.trim()),
-        ));
-        _vaccineNameController.clear();
-        _vaccineDateController.clear();
-      });
-    } else {
-      _showSnackBar('Por favor, ingresa el nombre y la fecha de la vacuna.');
-    }
-  }
-
-  // Función para eliminar una vacuna de la lista
-  void _removeVaccine(int index) {
-    setState(() {
-      _vaccineRecords.removeAt(index);
-    });
-  }
-
-  // Lógica para seleccionar/tomar foto
-  Future<void> _pickImage(ImageSource source) async {
-    final pickedFile = await ImagePicker().pickImage(source: source);
-    if (pickedFile != null) {
-      if (!mounted) return; // Mounted check
-      setState(() {
-        _newProfileImageFile = File(pickedFile.path);
+        _birthDateController.text = DateFormat('dd/MM/yyyy').format(picked);
       });
     }
   }
 
-  Future<void> _handleEdit() async {
-    if (!_formKey.currentState!.validate()) {
-      _showSnackBar('Por favor, completa todos los campos requeridos.');
-      return;
-    }
-
-    setState(() {
-      _loading = true;
-    });
-
+  Future<String?> _uploadImage(File image) async {
     try {
-      final user = _auth.currentUser;
-      if (user == null) {
-        _showSnackBar('No hay usuario autenticado. Inicia sesión.');
-        return;
-      }
-
-      String? updatedProfileImageUrl = _existingProfileImageUrl;
-      if (_newProfileImageFile != null) {
-        // Subir nueva imagen a Firebase Storage
-        final String fileName =
-            '${user.uid}/${DateTime.now().millisecondsSinceEpoch}_${_newProfileImageFile!.path.split('/').last}';
-        final Reference storageRef =
-            _storage.ref().child('animal_profile_images/$fileName');
-        final UploadTask uploadTask = storageRef.putFile(_newProfileImageFile!);
-        final TaskSnapshot snapshot = await uploadTask;
-        updatedProfileImageUrl = await snapshot.ref.getDownloadURL();
-        print('Nueva imagen de perfil subida: $updatedProfileImageUrl');
-      } else if (_existingProfileImageUrl == null &&
-          _newProfileImageFile == null) {
-        // Si no había imagen y no se subió una nueva, o si la existente se eliminó
-        updatedProfileImageUrl = null;
-      }
-
-      // Preparar datos de vacunas para guardar
-      List<Map<String, dynamic>> vaccinationsData =
-          _vaccineRecords.map((v) => v.toMap()).toList();
-
-      // Preparar datos de preñez
-      bool? isPregnantData;
-      DateTime? pregnancyDateData;
-
-      if (_selectedSex == 'Hembra') {
-        isPregnantData = _isPregnant;
-        if (_isPregnant) {
-          pregnancyDateData = _pregnancyDateController.text.trim().isEmpty
-              ? null
-              : DateFormat('dd/MM/yyyy')
-                  .parse(_pregnancyDateController.text.trim());
-        }
-      }
-
-      final updatedAnimalData = {
-        'name': _nameController.text.trim(),
-        'earTagNumber': _earTagNumberController.text.trim(),
-        'legNumber': _legNumberController.text.trim(),
-        'breed': _selectedBreed,
-        'sex': _selectedSex,
-        'birthDate': _birthDateController.text.trim().isEmpty
-            ? null
-            : Timestamp.fromDate(DateFormat('dd/MM/yyyy')
-                .parse(_birthDateController.text.trim())),
-        'registrationNumber': _registrationNumberController.text.trim().isEmpty
-            ? null
-            : _registrationNumberController.text.trim(),
-        'birthWeight': _birthWeightController.text.trim().isEmpty
-            ? null
-            : double.tryParse(_birthWeightController.text.trim()),
-        'weaningWeight': _weaningWeightController.text.trim().isEmpty
-            ? null
-            : double.tryParse(_weaningWeightController.text.trim()),
-        'father': _fatherController.text.trim().isEmpty
-            ? null
-            : _fatherController.text.trim(),
-        'mother': _motherController.text.trim().isEmpty
-            ? null
-            : _motherController.text.trim(),
-        'diseaseResistance': _diseaseResistanceController.text.trim().isEmpty
-            ? null
-            : _diseaseResistanceController.text.trim(),
-        'fertilityInfo': _fertilityInfoController.text.trim().isEmpty
-            ? null
-            : _fertilityInfoController.text.trim(),
-        'geneticMarkers': _geneticMarkersController.text.trim().isEmpty
-            ? null
-            : _geneticMarkersController.text.trim(),
-        'description': _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        'profileImageUrl': updatedProfileImageUrl,
-        'vaccinations': vaccinationsData,
-        'isPregnant': isPregnantData,
-        'pregnancyDate': pregnancyDateData != null
-            ? Timestamp.fromDate(pregnancyDateData)
-            : null,
-        'purpose': _selectedPurpose,
-      };
-
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('animals')
-          .doc(widget.animalId)
-          .update(updatedAnimalData);
-
-      if (!mounted) return;
-      _showSnackBar('Animal editado exitosamente!');
-      Navigator.of(context).pop(
-          true); // Pasar 'true' para indicar éxito y recargar datos en la pantalla anterior
+      final ref = _storage.ref().child('animal_images').child(
+          '${widget.animalId}_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await ref.putFile(image);
+      return await ref.getDownloadURL();
     } catch (e) {
-      print('Error al editar animal: $e');
-      if (!mounted) return;
-      _showSnackBar('Error al editar animal: ${e.toString()}');
-    } finally {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-      });
+      return null;
     }
   }
 
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+  void _handleEdit() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() => _loading = true);
+      try {
+        final user = _auth.currentUser;
+        if (user != null) {
+          String? imageUrl = _existingImageUrl;
+          if (_imageFile != null) {
+            imageUrl = await _uploadImage(_imageFile!);
+          }
+
+          bool isPregnantData = false;
+          DateTime? pregnancyDateData;
+
+          if (_selectedSex == 'Hembra') {
+            isPregnantData = _isPregnant;
+            if (_isPregnant) {
+              pregnancyDateData = _pregnancyDateController.text.trim().isEmpty
+                  ? null
+                  : DateFormat('dd/MM/yyyy')
+                      .parse(_pregnancyDateController.text.trim());
+            }
+          }
+
+          // NOTA: No actualizamos el campo 'vaccinations' ni 'vaccines' para no borrar el historial existente
+          final updateData = {
+            'name': _nameController.text.trim(),
+            'earTagNumber': _earTagNumberController.text.trim(),
+            'legNumber': _legNumberController.text.trim(),
+            'registrationNumber': _registrationNumberController.text.trim(),
+            'sex': _selectedSex,
+            'breed': _selectedBreed,
+            'purpose': _selectedPurpose,
+            'birthDate': _birthDateController.text.isNotEmpty
+                ? Timestamp.fromDate(
+                    DateFormat('dd/MM/yyyy').parse(_birthDateController.text))
+                : null,
+            'birthWeight': double.tryParse(_birthWeightController.text),
+            'weaningWeight': double.tryParse(_weaningWeightController.text),
+            'description': _descriptionController.text.trim(),
+            'profileImageUrl': imageUrl,
+            'father': _fatherController.text.trim(),
+            'mother': _motherController.text.trim(),
+            'geneticMarkers': _geneticMarkersController.text.trim(),
+            'diseaseResistance': _diseaseResistanceController.text.trim(),
+            'fertilityInfo': _fertilityInfoController.text.trim(),
+            'isPregnant': isPregnantData,
+            'pregnancyDate': pregnancyDateData != null
+                ? Timestamp.fromDate(pregnancyDateData)
+                : null,
+          };
+
+          await _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('animals')
+              .doc(widget.animalId)
+              .update(updateData);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Animal actualizado correctamente'),
+                backgroundColor: Colors.green));
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (e) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Error al actualizar: $e'),
+              backgroundColor: Colors.red));
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
+    }
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10.0, top: 10.0),
+      child: Text(title,
+          style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF5e3a1c))),
     );
   }
 
-  // Widget para un campo de entrada con un estilo estético mejorado
-  Widget _buildFancyInputField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
-    int maxLines = 1,
-    String? Function(String?)? validator,
-    List<TextInputFormatter>? inputFormatters,
-  }) {
+  Widget _buildFancyInputField(
+      {required TextEditingController controller,
+      required String label,
+      required IconData icon,
+      TextInputType keyboardType = TextInputType.text,
+      bool readOnly = false,
+      VoidCallback? onTap,
+      int maxLines = 1,
+      String? Function(String?)? validator,
+      List<TextInputFormatter>? inputFormatters}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 15.0),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12.0),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 5,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12.0),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                spreadRadius: 1,
+                blurRadius: 5,
+                offset: const Offset(0, 3))
+          ]),
       child: TextFormField(
         controller: controller,
         keyboardType: keyboardType,
+        readOnly: readOnly,
+        onTap: onTap,
         maxLines: maxLines,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
-          border: InputBorder.none, // Eliminamos el borde del InputDecoration
+          border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
           labelStyle: const TextStyle(color: Color(0xFF5e3a1c), fontSize: 16),
-          floatingLabelBehavior:
-              FloatingLabelBehavior.auto, // Mantener el label flotante
+          floatingLabelBehavior: FloatingLabelBehavior.auto,
         ),
         validator: validator,
-        inputFormatters: inputFormatters, // Añadir inputFormatters
-        style: const TextStyle(color: Colors.black87, fontSize: 16),
+        inputFormatters: inputFormatters,
       ),
     );
   }
 
-  // Widget para el selector de fecha con estilo estético mejorado
-  Widget _buildFancyDateFormField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    required VoidCallback onTap,
-    String? Function(String?)? validator,
-  }) {
+  Widget _buildFancyDateFormField(
+      {required TextEditingController controller,
+      required String label,
+      required IconData icon,
+      required VoidCallback onTap,
+      String? Function(String?)? validator}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 15.0),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12.0),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 5,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12.0),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                spreadRadius: 1,
+                blurRadius: 5,
+                offset: const Offset(0, 3))
+          ]),
       child: TextFormField(
         controller: controller,
         readOnly: true,
@@ -546,139 +379,79 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
-          border: InputBorder.none, // Eliminamos el borde del InputDecoration
+          border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
           labelStyle: const TextStyle(color: Color(0xFF5e3a1c), fontSize: 16),
           floatingLabelBehavior: FloatingLabelBehavior.auto,
-          suffixIcon: const Icon(Icons.calendar_today,
-              color: Colors.grey), // Icono de calendario
+          suffixIcon: const Icon(Icons.calendar_today, color: Colors.grey),
         ),
         validator: validator,
-        style: const TextStyle(color: Colors.black87, fontSize: 16),
       ),
     );
   }
 
-  // Widget para el DropdownFormField con un estilo estético mejorado
-  Widget _buildFancyDropdownField({
-    required String label,
-    required IconData icon,
-    required String? value,
-    required List<String> items,
-    required ValueChanged<String?> onChanged,
-    String? Function(String?)? validator,
-  }) {
+  Widget _buildFancyDropdownField(
+      {required String label,
+      required IconData icon,
+      required String? value,
+      required List<String> items,
+      required void Function(String?) onChanged,
+      String? Function(String?)? validator}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 15.0),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12.0),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 5,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12.0),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                spreadRadius: 1,
+                blurRadius: 5,
+                offset: const Offset(0, 3))
+          ]),
       child: DropdownButtonFormField<String>(
         value: value,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
-          border: InputBorder.none, // Eliminamos el borde del InputDecoration
+          border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
           labelStyle: const TextStyle(color: Color(0xFF5e3a1c), fontSize: 16),
           floatingLabelBehavior: FloatingLabelBehavior.auto,
         ),
-        items: items.map<DropdownMenuItem<String>>((String item) {
-          return DropdownMenuItem<String>(
-            value: item,
-            child: Text(item, style: const TextStyle(color: Colors.black87)),
-          );
-        }).toList(),
+        items: items
+            .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+            .toList(),
         onChanged: onChanged,
         validator: validator,
-        style: const TextStyle(color: Colors.black87, fontSize: 16),
-      ),
-    );
-  }
-
-  // Widget auxiliar para títulos de sección
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10.0, top: 10.0),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: Color(0xFF5e3a1c),
-        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    if (_loading)
       return const Scaffold(
-        backgroundColor: Color(0xFFfbf6ec),
-        body: Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6b4226)),
-          ),
-        ),
-      );
-    }
-
-    if (_animal == null) {
-      return Scaffold(
-        backgroundColor: const Color(0xFFfbf6ec),
-        appBar: AppBar(
-          backgroundColor: const Color(0xFFfbf6ec),
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF5e3a1c)),
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-          ),
-          title: const Text('Editar Animal',
-              style: TextStyle(color: Color(0xFF5e3a1c))),
-        ),
-        body: const Center(
-          child: Text(
-            'Animal no encontrado.',
-            style: TextStyle(fontSize: 16, color: Color(0xFF5e3a1c)),
-          ),
-        ),
-      );
-    }
+          backgroundColor: Color(0xFFfbf6ec),
+          body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF6b4226))));
 
     return Scaffold(
       backgroundColor: const Color(0xFFfbf6ec),
       appBar: AppBar(
+        title: const Text('Editar Animal',
+            style: TextStyle(
+                color: Color(0xFF5e3a1c),
+                fontWeight: FontWeight.bold,
+                fontSize: 24)),
         backgroundColor: const Color(0xFFfbf6ec),
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF5e3a1c)),
-          onPressed: () {
-            Navigator.of(context).pop();
-          },
-        ),
-        title: Text(
-          'Editar ${_animal!.name}',
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF5e3a1c),
-          ),
-        ),
         centerTitle: true,
+        leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF5e3a1c)),
+            onPressed: () => Navigator.of(context).pop()),
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -688,24 +461,20 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Sección de Foto de Perfil
                 Center(
                   child: Stack(
                     children: [
                       CircleAvatar(
                         radius: 80,
                         backgroundColor: Colors.grey[200],
-                        backgroundImage: _newProfileImageFile != null
-                            ? FileImage(_newProfileImageFile!) as ImageProvider
-                            : (_existingProfileImageUrl != null
-                                ? NetworkImage(_existingProfileImageUrl!)
-                                    as ImageProvider
-                                : null),
-                        child: _newProfileImageFile == null &&
-                                _existingProfileImageUrl == null
+                        backgroundImage: _imageFile != null
+                            ? FileImage(_imageFile!)
+                            : (_existingImageUrl != null
+                                ? NetworkImage(_existingImageUrl!)
+                                : null) as ImageProvider?,
+                        child: (_imageFile == null && _existingImageUrl == null)
                             ? const Icon(FontAwesomeIcons.cow,
-                                size: 80,
-                                color: Colors.grey) // CAMBIO: Icono de vaca
+                                size: 80, color: Colors.grey)
                             : null,
                       ),
                       Positioned(
@@ -715,71 +484,59 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                           onTap: () {
                             showModalBottomSheet(
                               context: context,
-                              builder: (BuildContext bc) {
-                                return SafeArea(
-                                  child: Wrap(
-                                    children: <Widget>[
-                                      ListTile(
+                              builder: (context) => SafeArea(
+                                child: Wrap(
+                                  children: [
+                                    ListTile(
                                         leading:
                                             const Icon(Icons.photo_library),
                                         title: const Text('Galería'),
                                         onTap: () {
                                           _pickImage(ImageSource.gallery);
                                           Navigator.of(context).pop();
-                                        },
-                                      ),
-                                      ListTile(
+                                        }),
+                                    ListTile(
                                         leading: const Icon(Icons.camera_alt),
                                         title: const Text('Cámara'),
                                         onTap: () {
                                           _pickImage(ImageSource.camera);
                                           Navigator.of(context).pop();
+                                        }),
+                                    if (_imageFile != null ||
+                                        _existingImageUrl != null)
+                                      ListTile(
+                                        leading: const Icon(
+                                            Icons.delete_forever,
+                                            color: Colors.red),
+                                        title: const Text('Quitar Foto',
+                                            style:
+                                                TextStyle(color: Colors.red)),
+                                        onTap: () {
+                                          setState(() {
+                                            _imageFile = null;
+                                            _existingImageUrl = null;
+                                          });
+                                          Navigator.of(context).pop();
                                         },
                                       ),
-                                      if (_newProfileImageFile != null ||
-                                          _existingProfileImageUrl !=
-                                              null) // Opción para quitar foto si ya hay una
-                                        ListTile(
-                                          leading: const Icon(
-                                              Icons.delete_forever,
-                                              color: Colors.red),
-                                          title: const Text('Quitar Foto',
-                                              style:
-                                                  TextStyle(color: Colors.red)),
-                                          onTap: () {
-                                            setState(() {
-                                              _newProfileImageFile = null;
-                                              _existingProfileImageUrl = null;
-                                            });
-                                            Navigator.of(context).pop();
-                                          },
-                                        ),
-                                    ],
-                                  ),
-                                );
-                              },
+                                  ],
+                                ),
+                              ),
                             );
                           },
                           child: Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).primaryColor,
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(8),
-                            child: const Icon(
-                              Icons.camera_alt,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
+                              decoration: BoxDecoration(
+                                  color: Theme.of(context).primaryColor,
+                                  shape: BoxShape.circle),
+                              padding: const EdgeInsets.all(8),
+                              child: const Icon(Icons.camera_alt,
+                                  color: Colors.white, size: 20)),
                         ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 30),
-
-                // Sección: Información Básica
                 _buildSectionTitle('Información Básica'),
                 Card(
                   elevation: 2,
@@ -791,112 +548,69 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                     child: Column(
                       children: [
                         _buildFancyInputField(
-                          controller: _nameController,
-                          label: 'Nombre del animal',
-                          icon: Icons.abc,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Por favor, ingresa el nombre';
-                            }
-                            return null;
-                          },
-                        ),
+                            controller: _nameController,
+                            label: 'Nombre o Alias',
+                            icon: Icons.abc,
+                            validator: (value) => value == null || value.isEmpty
+                                ? 'Requerido'
+                                : null),
                         _buildFancyInputField(
-                          controller: _earTagNumberController,
-                          label: 'Número de arete',
-                          icon: FontAwesomeIcons.tag,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Por favor, ingresa el número de arete';
-                            }
-                            return null;
-                          },
-                        ),
+                            controller: _earTagNumberController,
+                            label: 'Número de Arete',
+                            icon: FontAwesomeIcons.tag,
+                            validator: (value) => value == null || value.isEmpty
+                                ? 'Requerido'
+                                : null),
                         _buildFancyInputField(
-                          controller: _legNumberController,
-                          label: 'Número de pierna',
-                          icon: FontAwesomeIcons.hashtag,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Por favor, ingresa el número de pierna';
-                            }
-                            return null;
-                          },
-                        ),
+                            controller: _legNumberController,
+                            label: 'Número de Pierna',
+                            icon: FontAwesomeIcons.hashtag),
                         _buildFancyDropdownField(
-                          label: 'Raza *',
-                          icon: FontAwesomeIcons.cow,
-                          value: _selectedBreed,
-                          items: _bovineBreeds,
-                          onChanged: (String? newValue) {
-                            setState(() {
-                              _selectedBreed = newValue;
-                            });
-                          },
-                          validator: (value) => value == null || value.isEmpty
-                              ? 'Campo obligatorio'
-                              : null,
-                        ),
+                            value: _selectedBreed,
+                            label: 'Raza',
+                            icon: FontAwesomeIcons.cow,
+                            items: _breeds,
+                            onChanged: (val) =>
+                                setState(() => _selectedBreed = val),
+                            validator: (value) =>
+                                value == null ? 'Requerido' : null),
                         _buildFancyDropdownField(
-                          label: 'Sexo',
-                          icon: FontAwesomeIcons.venusMars,
-                          value: _selectedSex,
-                          items: const ['Macho', 'Hembra'],
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedSex = value;
-                              // Resetear estado de preñez si el sexo cambia a Macho
-                              if (_selectedSex == 'Macho') {
-                                _isPregnant = false;
-                                _pregnancyDateController.clear();
-                              }
-                            });
-                          },
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Por favor, selecciona el sexo';
-                            }
-                            return null;
-                          },
-                        ),
+                            value: _selectedSex,
+                            label: 'Sexo',
+                            icon: FontAwesomeIcons.venusMars,
+                            items: const ['Macho', 'Hembra'],
+                            onChanged: (val) {
+                              setState(() {
+                                _selectedSex = val;
+                                if (_selectedSex == 'Macho')
+                                  _isPregnant = false;
+                              });
+                            },
+                            validator: (value) =>
+                                value == null ? 'Requerido' : null),
                         _buildFancyDateFormField(
-                          controller: _birthDateController,
-                          label: 'Fecha de nacimiento',
-                          icon: Icons.calendar_today,
-                          onTap: () => _selectBirthDate(context),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Por favor, selecciona la fecha de nacimiento';
-                            }
-                            return null;
-                          },
-                        ),
+                            controller: _birthDateController,
+                            label: 'Fecha de Nacimiento',
+                            icon: Icons.calendar_today,
+                            onTap: () => _selectBirthDate(context)),
                         _buildFancyInputField(
-                          controller: _registrationNumberController,
-                          label: 'Número de registro',
-                          icon: Icons.app_registration,
-                        ),
+                            controller: _registrationNumberController,
+                            label: 'Número de Registro',
+                            icon: Icons.app_registration),
                         _buildFancyDropdownField(
-                          label: 'Propósito *',
-                          icon: FontAwesomeIcons.bullseye,
-                          value: _selectedPurpose,
-                          items: _purposes,
-                          onChanged: (String? newValue) {
-                            setState(() {
-                              _selectedPurpose = newValue;
-                            });
-                          },
-                          validator: (value) => value == null || value.isEmpty
-                              ? 'Selecciona el propósito'
-                              : null,
-                        ),
+                            value: _selectedPurpose,
+                            label: 'Propósito',
+                            icon: FontAwesomeIcons.bullseye,
+                            items: _purposes,
+                            onChanged: (val) =>
+                                setState(() => _selectedPurpose = val),
+                            validator: (value) =>
+                                value == null ? 'Requerido' : null),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Sección: Pesos
                 _buildSectionTitle('Pesos'),
                 Card(
                   elevation: 2,
@@ -908,48 +622,30 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                     child: Column(
                       children: [
                         _buildFancyInputField(
-                          controller: _birthWeightController,
-                          label: 'Peso al nacer (kg)',
-                          icon: Icons.line_weight,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d+\.?\d{0,2}')),
-                          ],
-                          validator: (value) {
-                            if (value != null &&
-                                value.isNotEmpty &&
-                                double.tryParse(value) == null) {
-                              return 'Ingresa un número válido';
-                            }
-                            return null;
-                          },
-                        ),
+                            controller: _birthWeightController,
+                            label: 'Peso Nacer (kg)',
+                            icon: Icons.line_weight,
+                            keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d+\.?\d{0,2}'))
+                            ]),
                         _buildFancyInputField(
-                          controller: _weaningWeightController,
-                          label: 'Peso al destete (kg)',
-                          icon: Icons.line_weight,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d+\.?\d{0,2}')),
-                          ],
-                          validator: (value) {
-                            if (value != null &&
-                                value.isNotEmpty &&
-                                double.tryParse(value) == null) {
-                              return 'Ingresa un número válido';
-                            }
-                            return null;
-                          },
-                        ),
+                            controller: _weaningWeightController,
+                            label: 'Peso Destete (kg)',
+                            icon: Icons.line_weight,
+                            keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                  RegExp(r'^\d+\.?\d{0,2}'))
+                            ]),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Sección: Parentesco
                 _buildSectionTitle('Parentesco'),
                 Card(
                   elevation: 2,
@@ -961,22 +657,18 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                     child: Column(
                       children: [
                         _buildFancyInputField(
-                          controller: _fatherController,
-                          label: 'Padre',
-                          icon: FontAwesomeIcons.person,
-                        ),
+                            controller: _fatherController,
+                            label: 'Arete del Padre',
+                            icon: FontAwesomeIcons.person),
                         _buildFancyInputField(
-                          controller: _motherController,
-                          label: 'Madre',
-                          icon: FontAwesomeIcons.personDress,
-                        ),
+                            controller: _motherController,
+                            label: 'Arete de la Madre',
+                            icon: FontAwesomeIcons.personDress),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Sección: Salud y Genética
                 _buildSectionTitle('Salud y Genética'),
                 Card(
                   elevation: 2,
@@ -988,108 +680,30 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                     child: Column(
                       children: [
                         _buildFancyInputField(
-                          controller: _diseaseResistanceController,
-                          label: 'Resistencia a enfermedades',
-                          icon: Icons.health_and_safety,
-                          maxLines: 3,
-                        ),
+                            controller: _diseaseResistanceController,
+                            label: 'Resistencia a enfermedades',
+                            icon: Icons.health_and_safety,
+                            maxLines: 3),
                         _buildFancyInputField(
-                          controller: _fertilityInfoController,
-                          label: 'Información de fertilidad',
-                          icon: FontAwesomeIcons.seedling,
-                          maxLines: 3,
-                        ),
+                            controller: _fertilityInfoController,
+                            label: 'Información de fertilidad',
+                            icon: FontAwesomeIcons.seedling,
+                            maxLines: 3),
                         _buildFancyInputField(
-                          controller: _geneticMarkersController,
-                          label: 'Marcadores genéticos',
-                          icon: FontAwesomeIcons.dna, // Icono de ADN
-                          maxLines: 3,
-                        ),
+                            controller: _geneticMarkersController,
+                            label: 'Marcadores genéticos',
+                            icon: FontAwesomeIcons.dna,
+                            maxLines: 3),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 20),
-
-                // Sección: Vacunación
-                _buildSectionTitle('Vacunación'),
-                Card(
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15)),
-                  color: Colors.white,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      children: [
-                        _buildFancyInputField(
-                          controller: _vaccineNameController,
-                          label: 'Nombre de la vacuna',
-                          icon: Icons.vaccines,
-                        ),
-                        _buildFancyDateFormField(
-                          controller: _vaccineDateController,
-                          label: 'Fecha de vacunación',
-                          icon: Icons.calendar_today,
-                          onTap: () => _selectVaccineDate(context),
-                        ),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _addVaccine,
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            label: const Text('Añadir Vacuna',
-                                style: TextStyle(color: Colors.white)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFc99450),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // Lista de vacunas añadidas
-                        _vaccineRecords.isEmpty
-                            ? const Text('No hay vacunas registradas.',
-                                style: TextStyle(color: Colors.grey))
-                            : ListView.builder(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: _vaccineRecords.length,
-                                itemBuilder: (context, index) {
-                                  final vaccine = _vaccineRecords[index];
-                                  return Card(
-                                    margin: const EdgeInsets.symmetric(
-                                        vertical: 4.0),
-                                    color: Colors.grey[100],
-                                    child: ListTile(
-                                      title: Text(vaccine.name,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold)),
-                                      subtitle: Text(DateFormat('dd/MM/yyyy')
-                                          .format(vaccine.date)),
-                                      trailing: IconButton(
-                                        icon: const Icon(Icons.remove_circle,
-                                            color: Colors.red),
-                                        onPressed: () => _removeVaccine(index),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Sección: Información de Reproducción (Solo si es Hembra)
                 if (_selectedSex == 'Hembra')
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildSectionTitle('Información de Reproducción'),
+                      _buildSectionTitle('Estado Reproductivo'),
                       Card(
                         elevation: 2,
                         shape: RoundedRectangleBorder(
@@ -1100,39 +714,21 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                           child: Column(
                             children: [
                               SwitchListTile(
-                                title: const Text(
-                                  '¿Está Preñada?',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF5e3a1c)),
-                                ),
+                                title: const Text('¿Está preñada?',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF5e3a1c))),
                                 value: _isPregnant,
-                                onChanged: (bool value) {
-                                  setState(() {
-                                    _isPregnant = value;
-                                    if (!value) {
-                                      _pregnancyDateController
-                                          .clear(); // Limpiar fecha si no está preñada
-                                    }
-                                  });
-                                },
                                 activeColor: const Color(0xFF6b4226),
+                                onChanged: (val) =>
+                                    setState(() => _isPregnant = val),
                               ),
                               if (_isPregnant)
                                 _buildFancyDateFormField(
-                                  controller: _pregnancyDateController,
-                                  label: 'Fecha de Preñez',
-                                  icon: Icons.date_range,
-                                  onTap: () => _selectPregnancyDate(context),
-                                  validator: (value) {
-                                    if (_isPregnant &&
-                                        (value == null || value.isEmpty)) {
-                                      return 'Por favor, selecciona la fecha de preñez';
-                                    }
-                                    return null;
-                                  },
-                                ),
+                                    controller: _pregnancyDateController,
+                                    label: 'Fecha estimada de preñez',
+                                    icon: Icons.date_range,
+                                    onTap: () => _selectPregnancyDate(context)),
                             ],
                           ),
                         ),
@@ -1140,9 +736,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                       const SizedBox(height: 20),
                     ],
                   ),
-
-                // Sección: Otros Datos (solo Descripción)
-                _buildSectionTitle('Otros Datos'),
+                _buildSectionTitle('Información Adicional'),
                 Card(
                   elevation: 2,
                   shape: RoundedRectangleBorder(
@@ -1153,45 +747,34 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                     child: Column(
                       children: [
                         _buildFancyInputField(
-                          controller: _descriptionController,
-                          label: 'Descripción',
-                          icon: Icons.description,
-                          maxLines: 5,
-                        ),
+                            controller: _descriptionController,
+                            label: 'Descripción',
+                            icon: Icons.description,
+                            maxLines: 5),
                       ],
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 30),
-                // Botón de Confirmar Edición
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF5e3a1c),
                     padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(10), // Bordes más redondeados
-                    ),
+                        borderRadius: BorderRadius.circular(10)),
                   ),
-                  onPressed: _loading
-                      ? null
-                      : _handleEdit, // Deshabilitar si está cargando
+                  onPressed: _loading ? null : _handleEdit,
                   child: _loading
                       ? const CircularProgressIndicator(
                           valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
-                        )
-                      : const Text(
-                          'Confirmar Edición',
+                              AlwaysStoppedAnimation<Color>(Colors.white))
+                      : const Text('Confirmar Edición',
                           style: TextStyle(
-                            fontSize: 18, // Tamaño de fuente más grande
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                              fontSize: 18,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold)),
                 ),
-                const SizedBox(height: 40), // Espacio extra al final
+                const SizedBox(height: 40),
               ],
             ),
           ),

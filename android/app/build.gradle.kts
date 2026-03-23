@@ -27,7 +27,7 @@ defaultConfig {
     applicationId = "com.example.manual_ganadero_flutter"
     // You can update the following values to match your application needs.
     // For more information, see: https://flutter.dev/to/review-gradle-config.
-    minSdkVersion(23) // Changed this line
+    minSdkVersion(24) // Changed this line
     targetSdk = flutter.targetSdkVersion
     versionCode = flutter.versionCode
     versionName = flutter.versionName

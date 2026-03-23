@@ -57,6 +57,7 @@ class Animal {
   final bool? isPregnant; // ¿Está preñada? (Solo para hembras)
   final DateTime? pregnancyDate; // Fecha de preñez (Solo si isPregnant es true)
   final String? purpose;
+  final DateTime? withdrawalDate; // Fecha de retiro por medicamentos
 
   Animal({
     required this.id,
@@ -84,6 +85,7 @@ class Animal {
     this.vaccinations, // Añadido al constructor
     this.isPregnant, // Añadido al constructor
     this.pregnancyDate, // Añadido al constructor
+    this.withdrawalDate,
     this.purpose,
   });
 
@@ -170,6 +172,10 @@ class Animal {
           : parsedVaccinations, // Guardar como null si está vacío
       isPregnant: data['isPregnant'] as bool?,
       pregnancyDate: parsedPregnancyDate,
+
+      withdrawalDate: data['withdrawalDate'] != null
+          ? (data['withdrawalDate'] as Timestamp).toDate()
+          : null,
     );
   }
 
@@ -206,6 +212,9 @@ class Animal {
       if (pregnancyDate != null)
         'pregnancyDate': Timestamp.fromDate(pregnancyDate!),
       if (purpose != null) 'purpose': purpose,
+
+      if (withdrawalDate != null)
+        'withdrawalDate': Timestamp.fromDate(withdrawalDate!),
     };
   }
 }

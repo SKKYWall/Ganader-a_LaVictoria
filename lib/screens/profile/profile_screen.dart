@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:manual_ganadero_flutter/screens/profile/personal_info_screen.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -21,6 +22,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadUserProfile();
+  }
+
+  // --- NUEVA FUNCIÓN: ENVIAR CORREO DE CAMBIO DE CONTRASEÑA ---
+  Future<void> _sendPasswordResetEmail() async {
+    if (_userEmail == 'Cargando...' || _userEmail == 'Email no disponible')
+      return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+          child: CircularProgressIndicator(color: Color(0xFFc99450))),
+    );
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: _userEmail);
+      if (mounted) Navigator.pop(context); // Quitar el loading
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Correo Enviado',
+                style: TextStyle(color: Colors.green)),
+            content: Text(
+                'Hemos enviado un enlace seguro a $_userEmail para que cambies tu contraseña.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendido',
+                    style: TextStyle(color: Color(0xFFc99450))),
+              )
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      }
+    }
   }
 
   Future<void> _loadUserProfile() async {
@@ -68,202 +112,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _signOut() async {
     try {
+      // 1. Cierra sesión en Firebase (Email/Contraseña o proveedor externo)
       await FirebaseAuth.instance.signOut();
-      // After signing out, navigate to the login screen and prevent going back
-      if (!mounted) return; // Add mounted check
+
+      // 2. Cierra sesión en Google para forzar a elegir la cuenta la próxima vez
+      await GoogleSignIn().signOut();
+
+      // Después de cerrar sesión, navega a la pantalla de login y limpia el historial
+      if (!mounted) return;
       Navigator.of(context)
           .pushNamedAndRemoveUntil('/login', (Route<dynamic> route) => false);
     } catch (e) {
       print('Error al cerrar sesión: $e');
-      if (!mounted) return; // Add mounted check
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error al cerrar sesión: $e')),
       );
     }
-  }
-
-  // --- FUNCIÓN PARA CAMBIAR CONTRASEÑA ---
-  Future<void> _changePassword() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay usuario autenticado.')),
-      );
-      return;
-    }
-
-    final TextEditingController currentPasswordController =
-        TextEditingController();
-    final TextEditingController newPasswordController = TextEditingController();
-    final TextEditingController confirmNewPasswordController =
-        TextEditingController();
-
-    final dialogFormKey = GlobalKey<FormState>();
-
-    await showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        // Usar un BuildContext diferente para el diálogo
-        return AlertDialog(
-          title: const Text('Cambiar Contraseña',
-              style: TextStyle(
-                  color: Color(0xFF5e3a1c), fontWeight: FontWeight.bold)),
-          backgroundColor: const Color(0xFFfbf6ec),
-          surfaceTintColor: const Color(0xFFfbf6ec),
-          content: Form(
-            key: dialogFormKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: currentPasswordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Contraseña Actual',
-                      prefixIcon:
-                          Icon(Icons.lock_outline, color: Color(0xFF5e3a1c)),
-                      border:
-                          OutlineInputBorder(), // Añadir borde para mejor visualización
-                    ),
-                    obscureText: true,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Ingresa tu contraseña actual';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                    controller: newPasswordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nueva Contraseña',
-                      prefixIcon: Icon(Icons.lock, color: Color(0xFF5e3a1c)),
-                      border: OutlineInputBorder(), // Añadir borde
-                    ),
-                    obscureText: true,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Ingresa una nueva contraseña';
-                      }
-                      if (value.length < 6) {
-                        return 'La contraseña debe tener al menos 6 caracteres';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                    controller: confirmNewPasswordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Confirmar Nueva Contraseña',
-                      prefixIcon: Icon(Icons.lock, color: Color(0xFF5e3a1c)),
-                      border: OutlineInputBorder(), // Añadir borde
-                    ),
-                    obscureText: true,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Confirma tu nueva contraseña';
-                      }
-                      if (value != newPasswordController.text) {
-                        return 'Las contraseñas no coinciden';
-                      }
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                if (!dialogContext.mounted) {
-                  return; // Usar el context del diálogo
-                }
-                Navigator.of(dialogContext).pop();
-              },
-              child: const Text('Cancelar',
-                  style: TextStyle(color: Color(0xFF6b4226))),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (dialogFormKey.currentState!.validate()) {
-                  if (!dialogContext.mounted) {
-                    return; // Usar el context del diálogo
-                  }
-                  Navigator.of(dialogContext).pop(); // Cierra el diálogo
-                  setState(() {
-                    _isLoading =
-                        true; // Muestra el loading en la pantalla principal
-                  });
-
-                  try {
-                    // Re-autenticar al usuario
-                    AuthCredential credential = EmailAuthProvider.credential(
-                      email: user.email!,
-                      password: currentPasswordController.text,
-                    );
-                    await user.reauthenticateWithCredential(credential);
-
-                    // Actualizar la contraseña
-                    await user.updatePassword(newPasswordController.text);
-
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content:
-                              Text('Contraseña actualizada exitosamente!')),
-                    );
-                  } on FirebaseAuthException catch (e) {
-                    String message;
-                    if (e.code == 'wrong-password') {
-                      message = 'Contraseña actual incorrecta.';
-                    } else if (e.code == 'too-many-requests') {
-                      message =
-                          'Demasiados intentos fallidos. Intenta de nuevo más tarde.';
-                    } else if (e.code == 'requires-recent-login') {
-                      message =
-                          'Esta operación requiere una autenticación reciente. Inicia sesión de nuevo y reintenta.';
-                    } else if (e.code == 'weak-password') {
-                      message =
-                          'La nueva contraseña es demasiado débil. Usa una más segura.';
-                    } else {
-                      message = 'Error al cambiar contraseña: ${e.message}';
-                    }
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(message)),
-                    );
-                  } catch (e) {
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error inesperado: $e')),
-                    );
-                  } finally {
-                    // Limpia los controladores del diálogo independientemente del éxito o fracaso
-                    currentPasswordController.dispose();
-                    newPasswordController.dispose();
-                    confirmNewPasswordController.dispose();
-
-                    if (!mounted) return;
-                    setState(() {
-                      _isLoading = false; // Oculta el loading
-                    });
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6b4226),
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Cambiar'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   @override
@@ -402,13 +267,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildDivider(),
               _buildProfileOption(
                 context,
-                icon: Icons.lock,
-                text: 'Cambiar Contraseña',
-                onTap: _changePassword, // Llama a la nueva función
-              ),
-              _buildDivider(),
-              _buildProfileOption(
-                context,
                 icon: Icons.notifications,
                 text: 'Notificaciones',
                 onTap: () {
@@ -488,6 +346,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ]),
             const SizedBox(height: 20),
+
+            _buildProfileOption(
+              context,
+              icon: Icons.lock_reset,
+              text: 'Cambiar Contraseña',
+              onTap: _sendPasswordResetEmail,
+            ),
           ],
         ),
       ),

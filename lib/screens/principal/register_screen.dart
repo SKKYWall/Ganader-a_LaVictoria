@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manual_ganadero_flutter/screens/profile/ranch_setup_screen.dart'; // Asegúrate de que la ruta coincida donde guardaste el archivo
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -58,7 +59,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
         _showAlert('Registro exitoso', 'Tu cuenta ha sido creada. ¡Bienvenido!',
             () {
-          Navigator.pushReplacementNamed(context, '/dashboard');
+          // Cambiamos el pushReplacementNamed por pushReplacement directo a la pantalla
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const RanchSetupScreen()),
+          );
         });
       }
     } on FirebaseAuthException catch (e) {

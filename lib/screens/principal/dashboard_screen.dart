@@ -1,3 +1,4 @@
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -14,6 +15,7 @@ import 'package:manual_ganadero_flutter/screens/calendar/calendar_screen.dart';
 import 'package:manual_ganadero_flutter/screens/marketplace/marketplace_screen.dart';
 import 'package:manual_ganadero_flutter/screens/intelligence/intelligence_screen.dart';
 import 'package:manual_ganadero_flutter/screens/estadisticas/estadisticas_screen.dart';
+import 'package:manual_ganadero_flutter/screens/modulos/reportes_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -159,7 +161,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 // MÓDULOS DINÁMICOS (POR PROPÓSITO)
                 // ==========================================
 
-                // FILA 3: LECHE Y CARNE
+                // FILA 3: LECHE Y GENÉTICA
                 Row(
                   children: [
                     Expanded(
@@ -169,27 +171,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         icon: FontAwesomeIcons.faucet,
                         color: Colors.blue,
                         isUnlocked: unlocked.contains('Leche'),
-                        onTap: () {/* Navegar a pantalla de leche */},
+                        onTap: () => Navigator.pushNamed(context, '/leche'),
                       ),
                     ),
                     const SizedBox(width: 15),
-                    Expanded(
-                      child: _buildDynamicModule(
-                        title: 'Prod. Carne',
-                        purposeKey: 'Carne',
-                        icon: FontAwesomeIcons.burger,
-                        color: Colors.redAccent,
-                        isUnlocked: unlocked.contains('Carne'),
-                        onTap: () {/* Navegar a pantalla de carne */},
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 15),
-
-                // FILA 4: GENÉTICA Y ENGORDA
-                Row(
-                  children: [
                     Expanded(
                       child: _buildDynamicModule(
                         title: 'Genética',
@@ -197,27 +182,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         icon: FontAwesomeIcons.dna,
                         color: Colors.teal,
                         isUnlocked: unlocked.contains('Genética'),
-                        onTap: () {/* Navegar a pantalla de genética */},
-                      ),
-                    ),
-                    const SizedBox(width: 15),
-                    Expanded(
-                      child: _buildDynamicModule(
-                        title: 'Engorda',
-                        purposeKey: 'Engorda',
-                        icon: FontAwesomeIcons.weightScale,
-                        color: Colors.orange,
-                        isUnlocked: unlocked.contains('Engorda'),
-                        onTap: () {/* Navegar a pantalla de engorda */},
+                        onTap: () => Navigator.pushNamed(context, '/genetica'),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 15),
 
-                // FILA 5: REPRODUCTORA (Ocupa la mitad izquierda para mantener la simetría)
+                // FILA 4: ENGORDA Y REPRODUCTORA
                 Row(
                   children: [
+                    Expanded(
+                      child: _buildDynamicModule(
+                        title: 'Engorda y Prod.',
+                        purposeKey: 'Engorda o Carne', // Actualizado mensaje
+                        icon: FontAwesomeIcons.weightScale,
+                        color: Colors.orange,
+                        // Se desbloquea con Engorda o Carne
+                        isUnlocked: unlocked.contains('Engorda') ||
+                            unlocked.contains('Carne'),
+                        onTap: () => Navigator.pushNamed(context, '/engorda'),
+                      ),
+                    ),
+                    const SizedBox(width: 15),
                     Expanded(
                       child: _buildDynamicModule(
                         title: 'Reproductora',
@@ -225,13 +212,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         icon: FontAwesomeIcons.venus,
                         color: Colors.pink,
                         isUnlocked: unlocked.contains('Reproductora'),
-                        onTap: () {/* Navegar a pantalla reproductora */},
+                        onTap: () =>
+                            Navigator.pushNamed(context, '/reproductora'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 15),
+
+                // FILA 5: SANIDAD Y REPORTES (Siempre Desbloqueados)
+                Row(
+                  children: [
+                    Expanded(
+                      child: ModuleCard(
+                        title: 'Sanidad',
+                        onTap: () =>
+                            Navigator.pushNamed(context, '/sanidadScreen'),
+                        children: const [
+                          Icon(Icons.vaccines, size: 50, color: Colors.teal),
+                          Text('Salud Animal', style: TextStyle(fontSize: 12)),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 15),
-                    const Expanded(
-                        child:
-                            SizedBox()), // Espacio vacío para cuadrar el grid
+                    Expanded(
+                      child: ModuleCard(
+                        title: 'Reportes',
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const ReportesScreen())),
+                        children: const [
+                          Icon(FontAwesomeIcons.filePdf,
+                              size: 50, color: Colors.redAccent),
+                          Text('Exportación', style: TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 20),
