@@ -12,6 +12,9 @@ class SanidadScreen extends StatefulWidget {
   State<SanidadScreen> createState() => _SanidadScreenState();
 }
 
+String? _currentRanchId;
+bool _isLoadingRanch = true;
+
 class _SanidadScreenState extends State<SanidadScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final User? _currentUser = FirebaseAuth.instance.currentUser;
@@ -46,11 +49,37 @@ class _SanidadScreenState extends State<SanidadScreen> {
 
   bool _isApplying = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentRanchId();
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    if (_currentUser == null) return;
+    try {
+      final doc =
+          await _firestore.collection('users').doc(_currentUser!.uid).get();
+      if (mounted) {
+        setState(() {
+          _currentRanchId =
+              (doc.data() as Map<String, dynamic>?)?['currentRanchId'];
+          _isLoadingRanch = false;
+        });
+      }
+    } catch (e) {
+      print("Error al cargar rancho: $e");
+      if (mounted) setState(() => _isLoadingRanch = false);
+    }
+  }
+
   Stream<QuerySnapshot> _getAllAnimals() {
     if (_currentUser == null) return const Stream.empty();
     return _firestore
-        .collection('users')
-        .doc(_currentUser!.uid)
+        .collection('users') // <-- AGREGADO
+        .doc(_currentUser!.uid) // <-- AGREGADO
+        .collection('ranches')
+        .doc(_currentRanchId)
         .collection('animals')
         .snapshots();
   }
@@ -107,6 +136,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
                         padding: const EdgeInsets.only(top: 10.0),
                         child: TextFormField(
                           controller: _monthsController,
+                          maxLength: 4,
                           keyboardType: TextInputType.number,
                           decoration: InputDecoration(
                             labelText: 'Meses para caducar (ej. 6)',
@@ -175,8 +205,10 @@ class _SanidadScreenState extends State<SanidadScreen> {
           // ¡AQUÍ ESTÁ LA SOLUCIÓN AL ERROR DE FIREBASE!
           // Cambiamos "calendar" por "calendarEvents" para coincidir con tus Reglas de Firebase
           DocumentReference eventRef = _firestore
-              .collection('users')
-              .doc(_currentUser!.uid)
+              .collection('users') // <-- AGREGADO
+              .doc(_currentUser!.uid) // <-- AGREGADO
+              .collection('ranches')
+              .doc(_currentRanchId)
               .collection('calendarEvents')
               .doc();
           batch.set(eventRef, {
@@ -191,8 +223,10 @@ class _SanidadScreenState extends State<SanidadScreen> {
 
       for (String animalId in _selectedAnimals) {
         DocumentReference animalRef = _firestore
-            .collection('users')
-            .doc(_currentUser!.uid)
+            .collection('users') // <-- AGREGADO
+            .doc(_currentUser!.uid) // <-- AGREGADO
+            .collection('ranches')
+            .doc(_currentRanchId)
             .collection('animals')
             .doc(animalId);
 
@@ -244,6 +278,15 @@ class _SanidadScreenState extends State<SanidadScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingRanch) {
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator(color: Colors.teal)));
+    }
+
+    if (_currentRanchId == null) {
+      return const Scaffold(
+          body: Center(child: Text("Selecciona un rancho primero")));
+    }
     return DefaultTabController(
       length: 2,
       child: Scaffold(
@@ -395,6 +438,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: _medNameController,
+                        maxLength: 30,
                         decoration: InputDecoration(
                             labelText: 'Nombre / Marca del medicamento',
                             border: OutlineInputBorder(
@@ -405,6 +449,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: _withdrawalDaysController,
+                        maxLength: 4,
                         keyboardType: TextInputType.number,
                         decoration: InputDecoration(
                             labelText:

@@ -16,6 +16,7 @@ import 'package:manual_ganadero_flutter/screens/marketplace/marketplace_screen.d
 import 'package:manual_ganadero_flutter/screens/intelligence/intelligence_screen.dart';
 import 'package:manual_ganadero_flutter/screens/estadisticas/estadisticas_screen.dart';
 import 'package:manual_ganadero_flutter/screens/modulos/reportes_screen.dart';
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -27,19 +28,85 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   User? _user;
 
+  // --- VARIABLES PARA LOS RANCHOS ---
+  String? _currentRanchId;
+  List<Map<String, dynamic>> _ranches = [];
+  bool _isLoadingRanches = true;
+
   @override
   void initState() {
     super.initState();
     _user = FirebaseAuth.instance.currentUser;
+    _loadRanches();
+    NotificationService().requestPermissions();
   }
 
-  // Stream que escucha los propósitos de los animales del usuario
+  // --- LÓGICA: Cargar los ranchos del usuario ---
+  Future<void> _loadRanches() async {
+    if (_user == null) return;
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_user!.uid)
+          .get();
+
+      String? currentRanch = userDoc.data()?['currentRanchId'];
+
+      final ranchesSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_user!.uid)
+          .collection('ranches')
+          .get();
+
+      List<Map<String, dynamic>> ranchesList = ranchesSnapshot.docs
+          .map((doc) => {
+                'id': doc.id,
+                'name': doc.data()['name'] ?? 'Rancho sin nombre',
+              })
+          .toList();
+
+      if (mounted) {
+        setState(() {
+          _ranches = ranchesList;
+          _currentRanchId = currentRanch;
+
+          // Si no hay rancho seleccionado, autoselecciona el primero
+          if (_currentRanchId == null && _ranches.isNotEmpty) {
+            _currentRanchId = _ranches.first['id'];
+            _updateCurrentRanch(_currentRanchId!);
+          }
+          _isLoadingRanches = false;
+        });
+      }
+    } catch (e) {
+      print('Error al cargar ranchos: $e');
+      if (mounted) setState(() => _isLoadingRanches = false);
+    }
+  }
+
+  // --- LÓGICA: Actualizar rancho en Firestore ---
+  Future<void> _updateCurrentRanch(String ranchId) async {
+    setState(() {
+      _currentRanchId = ranchId;
+    });
+    if (_user != null) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_user!.uid)
+          .update({'currentRanchId': ranchId});
+    }
+  }
+
+  // Stream que escucha los propósitos de los animales del usuario EN EL RANCHO ACTUAL
   Stream<Set<String>> _getUnlockedModulesStream() {
-    if (_user == null) return Stream.value({});
+    if (_user == null || _currentRanchId == null) return Stream.value({});
 
     return FirebaseFirestore.instance
         .collection('users')
         .doc(_user!.uid)
+        .collection('ranches')
+        .doc(_currentRanchId) // -> Ahora filtra por el rancho seleccionado
         .collection('animals')
         .snapshots()
         .map((snapshot) {
@@ -66,6 +133,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: const EdgeInsets.all(20.0),
             child: Column(
               children: [
+                // --- BOTÓN SELECTOR DE RANCHO ---
+                if (!_isLoadingRanches) _buildRanchSelector(),
+
                 DashboardChartModule(
                   title: 'Estadísticas',
                   onTap: () => Navigator.push(
@@ -284,6 +354,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // --- WIDGET: SELECTOR DE RANCHO ---
+  Widget _buildRanchSelector() {
+    if (_ranches.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 20),
+        child: Text('Sin ranchos registrados. Ve a tu perfil para crear uno.',
+            style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+      );
+    }
+
+    // --- CAMBIO: Se agregó el título superior "Cambia entre ranchos:" ---
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 4.0, bottom: 6.0),
+          child: Text(
+            'Cambia entre ranchos:',
+            style: TextStyle(
+                color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+        ),
+        Container(
+          margin: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                spreadRadius: 1,
+                blurRadius: 5,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _currentRanchId,
+              isExpanded: true,
+              icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF5e3a1c)),
+              dropdownColor: Colors.white,
+              style: const TextStyle(
+                color: Color(0xFF5e3a1c),
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+              items: _ranches.map((ranch) {
+                return DropdownMenuItem<String>(
+                  value: ranch['id'],
+                  child: Row(
+                    children: [
+                      const Icon(FontAwesomeIcons.houseChimney,
+                          size: 18, color: Color(0xFFc99450)),
+                      const SizedBox(width: 10),
+                      Text(ranch['name']),
+                    ],
+                  ),
+                );
+              }).toList(),
+              onChanged: (String? newValue) {
+                if (newValue != null && newValue != _currentRanchId) {
+                  _updateCurrentRanch(newValue);
+                }
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   // Widget auxiliar para módulos que se bloquean/desbloquean
   Widget _buildDynamicModule({
     required String title,
@@ -342,8 +485,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Padding(
           padding: const EdgeInsets.only(right: 20.0),
           child: GestureDetector(
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const ProfileScreen())),
+            // --- CAMBIO CRÍTICO: Esperar a que regrese del perfil y recargar ---
+            onTap: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (context) => const ProfileScreen()));
+              _loadRanches();
+            },
             child: const CircleAvatar(
                 backgroundColor: Color(0xFFc99450),
                 child: Icon(Icons.person, color: Colors.white)),

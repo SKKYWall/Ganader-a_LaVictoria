@@ -40,7 +40,6 @@ class _RanchSetupScreenState extends State<RanchSetupScreen> {
         setState(() {
           _latitude = position.latitude;
           _longitude = position.longitude;
-          // Opcional: Podrías usar geocoding para poner el nombre de la ciudad aquí
           _locationController.text = "Ubicación GPS capturada";
         });
 
@@ -61,41 +60,72 @@ class _RanchSetupScreenState extends State<RanchSetupScreen> {
     }
   }
 
-  Future<void> _saveRanchInfo() async {
+  // Modificado: Ahora acepta guardar múltiples ranchos y no obliga el uso del GPS
+  Future<void> _saveRanchInfo({required bool addAnother}) async {
     if (!_formKey.currentState!.validate()) return;
+
     setState(() => _isLoading = true);
 
     try {
-      if (_currentUser != null) {
-        // 1. Creamos un nuevo documento con un ID automático en la subcolección 'ranches'
-        DocumentReference newRanchRef = _firestore
-            .collection('users')
-            .doc(_currentUser!.uid)
-            .collection('ranches')
-            .doc();
+      String ranchName = _ranchNameController.text.trim();
+      String location = _locationController.text.trim();
+      double hectares = double.tryParse(_hectaresController.text.trim()) ?? 0.0;
 
-        await newRanchRef.set({
-          'id': newRanchRef.id,
-          'ranchName': _ranchNameController.text.trim(),
-          'location': _locationController.text.trim(),
-          'latitude': _latitude,
-          'longitude': _longitude,
-          'hectares': double.tryParse(_hectaresController.text.trim()) ?? 0.0,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+      final userRef = _firestore.collection('users').doc(_currentUser!.uid);
 
-        // 2. Marcamos este rancho como el "seleccionado actualmente" en el perfil del usuario
-        await _firestore.collection('users').doc(_currentUser!.uid).update({
-          'currentRanchId': newRanchRef.id,
-          'setupCompleted': true,
-        });
+      // 1. Creamos una referencia para el NUEVO rancho
+      final newRanchRef = userRef.collection('ranches').doc();
 
-        if (mounted) Navigator.of(context).pushReplacementNamed('/dashboard');
+      // 2. Guardamos la información del rancho
+      Map<String, dynamic> ranchData = {
+        'name': ranchName,
+        'location': location,
+        'hectares': hectares,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      // Solo guardamos coordenadas si realmente usaron el botón de GPS
+      if (_latitude != null && _longitude != null) {
+        ranchData['latitude'] = _latitude;
+        ranchData['longitude'] = _longitude;
+      }
+
+      await newRanchRef.set(ranchData);
+
+      // 3. Actualizamos al usuario indicando que ya completó el setup
+      await userRef.set({
+        'setupCompleted': true,
+        'currentRanchId': newRanchRef.id,
+      }, SetOptions(merge: true));
+
+      if (mounted) {
+        if (addAnother) {
+          // Limpiar formulario para registrar otro rancho
+          _ranchNameController.clear();
+          _locationController.clear();
+          _hectaresController.clear();
+          _latitude = null;
+          _longitude = null;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Rancho agregado. Puedes registrar otro.'),
+                backgroundColor: Colors.green),
+          );
+        } else {
+          // Continuar al dashboard
+          Navigator.of(context).pushReplacementNamed('/dashboard');
+        }
       }
     } catch (e) {
-      // Manejo de error...
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al guardar la información: $e')),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -148,7 +178,6 @@ class _RanchSetupScreenState extends State<RanchSetupScreen> {
                     val == null || val.isEmpty ? 'Requerido' : null,
               ),
               const SizedBox(height: 15),
-              // CAMPO DE UBICACIÓN CON BOTÓN GPS
               TextFormField(
                 controller: _locationController,
                 decoration: InputDecoration(
@@ -184,23 +213,59 @@ class _RanchSetupScreenState extends State<RanchSetupScreen> {
                     val == null || val.isEmpty ? 'Requerido' : null,
               ),
               const SizedBox(height: 30),
-              SizedBox(
-                height: 50,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFc99450),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+
+              // --- CAMBIO DE BOTONES: AGREGAR MULTIPLES RANCHOS ---
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 50,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(
+                              color: Color(0xFFc99450), width: 2),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: _isLoading
+                            ? null
+                            : () => _saveRanchInfo(addAnother: true),
+                        child: const Text('+ Agregar Otro',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFFc99450))),
+                      ),
+                    ),
                   ),
-                  onPressed: _isLoading ? null : _saveRanchInfo,
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Guardar y Comenzar',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white)),
-                ),
+                  const SizedBox(width: 15),
+                  Expanded(
+                    child: SizedBox(
+                      height: 50,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFc99450),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: _isLoading
+                            ? null
+                            : () => _saveRanchInfo(addAnother: false),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2))
+                            : const Text('Comenzar',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white)),
+                      ),
+                    ),
+                  ),
+                ],
               )
             ],
           ),

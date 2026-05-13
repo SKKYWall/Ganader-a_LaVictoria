@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:url_launcher/url_launcher.dart'; // <-- AGREGA ESTO
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class ImportAnimalsScreen extends StatefulWidget {
   const ImportAnimalsScreen({super.key});
@@ -196,9 +197,41 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
       final user = _auth.currentUser;
       if (user == null) throw Exception('Usuario no autenticado');
 
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      // --- NUEVO: LEER PREFERENCIA DE NOTIFICACIONES ---
+      bool notificationsEnabled =
+          (userDoc.data() as Map<String, dynamic>?)?['notificationsEnabled'] ??
+              true;
+
+      if (currentRanchId == null) {
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Error: No hay un rancho seleccionado.';
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'No tienes un rancho seleccionado. Ve al inicio y selecciona uno.'),
+            backgroundColor: Colors.red,
+          ));
+        }
+        return;
+      }
+
       WriteBatch batch = _firestore.batch();
-      CollectionReference animalsRef =
-          _firestore.collection('users').doc(user.uid).collection('animals');
+      CollectionReference animalsRef = _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('ranches')
+          .doc(currentRanchId)
+          .collection('animals');
+
+      // Lista temporal para guardar qué alarmas programar si el guardado es exitoso
+      List<Map<String, dynamic>> pregnantAnimalsToSchedule = [];
 
       // Iteramos todos los animales de la lista previa y los preparamos para guardado masivo
       for (var animal in _previewAnimals) {
@@ -206,9 +239,36 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
             animalsRef.doc(); // Crea un nuevo ID en Firebase
         var animalData = animal.toFirestore();
         batch.set(docRef, animalData);
+
+        // --- NUEVO: PREPARAMOS LA ALARMA SI ESTÁ PREÑADA ---
+        if (animal.isPregnant == true &&
+            animal.pregnancyDate != null &&
+            notificationsEnabled) {
+          pregnantAnimalsToSchedule.add({
+            'id': docRef.id.hashCode,
+            'name': animal.name,
+            'pregnancyDate': animal.pregnancyDate
+          });
+        }
       }
 
       await batch.commit(); // Dispara la orden de guardar todo de un golpe
+
+      // --- NUEVO: PROGRAMAR LAS ALARMAS DESPUÉS DEL GUARDADO EXITOSO ---
+      for (var pregnantAnimal in pregnantAnimalsToSchedule) {
+        DateTime alertDate = pregnantAnimal['pregnancyDate']
+            .add(const Duration(days: 276)); // 7 días antes
+        if (alertDate.isAfter(DateTime.now())) {
+          await NotificationService().scheduleNotification(
+            id: pregnantAnimal['id'],
+            title: '¡Parto Cercano! 🐄',
+            body:
+                'La vaca ${pregnantAnimal['name']} (importada) está a aprox. una semana de su fecha de parto.',
+            scheduledDate: alertDate,
+          );
+        }
+      }
+      // --- FIN NUEVO CÓDIGO ---
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

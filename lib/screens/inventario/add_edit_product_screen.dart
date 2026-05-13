@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:manual_ganadero_flutter/models/product.dart';
 import 'package:intl/intl.dart'; // Para formatear fechas
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class AddEditProductScreen extends StatefulWidget {
   final Product? product; // Si es null, estamos agregando; si no, editando
@@ -166,12 +168,12 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     return TextInputType.number;
   }
 
+  // --- SOLUCIÓN: GUARDAR EN LA RUTA DEL RANCHO ---
   Future<void> _saveProduct() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    // Asegúrate de que _selectedCategory, _selectedSubCategory y _selectedUnit no sean null
     if (_selectedCategory == null ||
         _selectedSubCategory == null ||
         _selectedUnit == null) {
@@ -192,9 +194,27 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     }
 
     try {
-      final productsCollection = FirebaseFirestore.instance
+      // Obtenemos el Rancho Actual
+      final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
+          .get();
+      final currentRanchId = userDoc.data()?['currentRanchId'];
+
+      if (currentRanchId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Error: No tienes un rancho seleccionado.')),
+        );
+        return;
+      }
+
+      // La referencia ahora apunta a ranches -> [rancho_id] -> products
+      final productsCollection = FirebaseFirestore.instance
+          .collection('users') // <-- NUEVO
+          .doc(user.uid) // <-- NUEVO
+          .collection('ranches')
+          .doc(currentRanchId)
           .collection('products');
 
       final productData = Product(
@@ -202,7 +222,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         name: _nameController.text.trim(),
         category: _selectedCategory!,
         subCategory: _selectedSubCategory!,
-        // REMOVIDO: description: _descriptionController.text.trim(),
         quantity: double.parse(_quantityController.text.trim()),
         unit: _selectedUnit!,
         price: _priceController.text.isNotEmpty
@@ -232,6 +251,28 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
           );
         }
       }
+
+      // --- NUEVO: ALERTA INMEDIATA DE INVENTARIO BAJO ---
+      double cantidadActual =
+          double.tryParse(_quantityController.text.trim()) ?? 0;
+
+      // Si la cantidad es 5 o menor, disparamos la alerta
+      if (cantidadActual <= 5) {
+        // Leemos la preferencia de notificaciones del userDoc que ya habías consultado arriba
+        bool notificationsEnabled =
+            userDoc.data()?['notificationsEnabled'] ?? true;
+
+        if (notificationsEnabled) {
+          await NotificationService().showImmediateNotification(
+            id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+            title: '⚠️ Inventario Bajo',
+            body:
+                'Te quedan solo $cantidadActual ${_selectedUnit ?? 'unidades'} de ${_nameController.text.trim()}. ¡Es hora de resurtir!',
+          );
+        }
+      }
+      // --- FIN NUEVO CÓDIGO ---
+
       if (mounted) {
         Navigator.pop(context, true); // Regresar y refrescar la lista
       }
@@ -290,11 +331,9 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFfbf6ec),
       appBar: AppBar(
-        backgroundColor:
-            const Color(0xFFfbf6ec), // Changed to match RegisterAnimalScreen
-        elevation: 0, // Changed to match RegisterAnimalScreen
+        backgroundColor: const Color(0xFFfbf6ec),
+        elevation: 0,
         leading: IconButton(
-          // Added leading icon for back navigation
           icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF5e3a1c)),
           onPressed: () {
             Navigator.of(context).pop();
@@ -305,41 +344,37 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
           style: const TextStyle(
             color: Color(0xFF5e3a1c),
             fontWeight: FontWeight.bold,
-            fontSize: 24, // Matched RegisterAnimalScreen title size
+            fontSize: 24,
           ),
         ),
-        centerTitle: true, // Centered title
+        centerTitle: true,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.stretch, // Changed to stretch
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _buildTextField(
                 controller: _nameController,
-                label:
-                    'Nombre del Producto', // Changed labelText to label for consistency
-                icon: Icons.inventory, // Added icon
+                label: 'Nombre del Producto',
+                icon: Icons.inventory,
+                maxLength: 15, // <-- LÍMITE AGREGADO
                 validator: (value) => value == null || value.isEmpty
                     ? 'Por favor ingresa el nombre del producto'
                     : null,
               ),
-              // No SizedBox after each, as Padding in _buildTextField/DropdownFormField will handle vertical spacing
               _buildDropdownFormField<String>(
-                // Renamed to _buildDropdownFormField
                 label: 'Categoría',
-                icon: Icons.category, // Added icon
+                icon: Icons.category,
                 value: _selectedCategory,
                 items: _nestedCategoriesAndUnits.keys.toList(),
                 onChanged: (String? newValue) {
                   setState(() {
                     _selectedCategory = newValue;
-                    _selectedSubCategory =
-                        null; // Reset subcategory when category changes
-                    _selectedUnit = null; // Reset unit when category changes
+                    _selectedSubCategory = null;
+                    _selectedUnit = null;
                   });
                 },
                 validator: (value) => value == null || value.isEmpty
@@ -348,9 +383,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               ),
               if (_selectedCategory != null)
                 _buildDropdownFormField<String>(
-                  // Renamed to _buildDropdownFormField
                   label: 'Subcategoría',
-                  icon: Icons.subtitles, // Added icon
+                  icon: Icons.subtitles,
                   value: _selectedSubCategory,
                   items: _nestedCategoriesAndUnits[_selectedCategory]
                           ?.keys
@@ -359,8 +393,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                   onChanged: (String? newValue) {
                     setState(() {
                       _selectedSubCategory = newValue;
-                      _selectedUnit =
-                          null; // Reset unit when subcategory changes
+                      _selectedUnit = null;
                     });
                   },
                   validator: (value) => value == null || value.isEmpty
@@ -369,9 +402,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                 ),
               if (_selectedSubCategory != null)
                 _buildDropdownFormField<String>(
-                  // Renamed to _buildDropdownFormField
                   label: 'Unidad',
-                  icon: Icons.scale, // Added icon
+                  icon: Icons.scale,
                   value: _selectedUnit,
                   items: _nestedCategoriesAndUnits[_selectedCategory]![
                       _selectedSubCategory]!,
@@ -387,7 +419,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               _buildTextField(
                 controller: _quantityController,
                 label: 'Cantidad',
-                icon: Icons.numbers, // Added icon
+                icon: Icons.numbers,
+                maxLength: 10, // <-- LÍMITE AGREGADO
                 keyboardType: _getQuantityKeyboardType(),
                 validator: (value) => value == null || value.isEmpty
                     ? 'Por favor ingresa la cantidad'
@@ -396,7 +429,8 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               _buildTextField(
                 controller: _priceController,
                 label: 'Precio (Opcional)',
-                icon: Icons.attach_money, // Added icon
+                maxLength: 10, // <-- LÍMITE AGREGADO
+                icon: Icons.attach_money,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 validator: (value) {
@@ -411,32 +445,30 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
               _buildTextField(
                 controller: _notesController,
                 label: 'Notas Adicionales (Opcional)',
-                icon: Icons.notes, // Added icon
-                maxLines: 3, // Increased maxLines for consistency
+                maxLength: 250, // <-- LÍMITE AGREGADO
+                icon: Icons.notes,
+                maxLines: 3,
               ),
               _buildDateFormField(
-                // Renamed to _buildDateFormField
                 controller: _entryDateController,
                 label: 'Fecha de Entrada',
-                icon: Icons.calendar_today, // Added icon
+                icon: Icons.calendar_today,
                 onTap: () => _selectDate(context, true),
                 validator: (value) => value == null || value.isEmpty
                     ? 'Por favor selecciona la fecha de entrada'
                     : null,
               ),
               _buildDateFormField(
-                // Renamed to _buildDateFormField
                 controller: _expirationDateController,
                 label: 'Fecha de Caducidad (Opcional)',
-                icon: Icons.calendar_month, // Added icon
+                icon: Icons.calendar_month,
                 onTap: () => _selectDate(context, false),
               ),
               const SizedBox(height: 30),
               ElevatedButton(
                 onPressed: _saveProduct,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      const Color(0xFF5e3a1c), // Consistent button color
+                  backgroundColor: const Color(0xFF5e3a1c),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 15),
                   shape: RoundedRectangleBorder(
@@ -448,10 +480,10 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                       ? 'Agregar Producto'
                       : 'Guardar Cambios',
                   style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold), // Bold text
+                      fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
-              const SizedBox(height: 40), // Extra space at the bottom
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -462,44 +494,42 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   // REFACTORIZADO: _buildTextField para el nuevo estilo
   Widget _buildTextField({
     required TextEditingController controller,
-    required String label, // Changed from labelText
-    required IconData icon, // Added icon parameter
+    required String label,
+    required IconData icon,
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
+    int? maxLength,
     String? Function(String?)? validator,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: 0.0,
-          vertical: 8.0), // No horizontal padding here, handled by parent
+      padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 8.0),
       child: TextFormField(
         controller: controller,
         keyboardType: keyboardType,
         maxLines: maxLines,
+        maxLength: maxLength,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon,
-              color: const Color(0xFF5e3a1c)), // Icon for consistency
-          border: InputBorder.none, // No border for the field itself
+          prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
+          border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 0),
           labelStyle: const TextStyle(color: Color(0xFF5e3a1c)),
-          floatingLabelBehavior:
-              FloatingLabelBehavior.never, // Consistent label behavior
+          floatingLabelBehavior: FloatingLabelBehavior.never,
         ),
         validator: validator,
-        style: const TextStyle(color: Colors.black87), // Consistent text style
+        style: const TextStyle(color: Colors.black87),
       ),
     );
   }
 
   // REFACTORIZADO: _buildDropdownFormField para el nuevo estilo
   Widget _buildDropdownFormField<T>({
-    required String label, // Changed from labelText
-    required IconData icon, // Added icon parameter
+    required String label,
+    required IconData icon,
     required T? value,
     required List<T> items,
     required ValueChanged<T?> onChanged,
-    String? Function(T?)? validator, // Changed validator to accept T?
+    String? Function(T?)? validator,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 8.0),
@@ -507,27 +537,24 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         value: value,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon,
-              color: const Color(0xFF5e3a1c)), // Icon for consistency
+          prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 0),
           labelStyle: const TextStyle(color: Color(0xFF5e3a1c)),
           floatingLabelBehavior: FloatingLabelBehavior.never,
-          suffixIcon: const Icon(Icons.chevron_right,
-              color: Colors.grey), // Chevron icon
+          suffixIcon: const Icon(Icons.chevron_right, color: Colors.grey),
         ),
-        icon: const SizedBox.shrink(), // Oculta el icono de flecha por defecto
+        icon: const SizedBox.shrink(),
         items: items.map<DropdownMenuItem<T>>((T item) {
           return DropdownMenuItem<T>(
             value: item,
             child: Text(item.toString(),
-                style: const TextStyle(
-                    color: Colors.black87)), // Consistent text style
+                style: const TextStyle(color: Colors.black87)),
           );
         }).toList(),
         onChanged: onChanged,
         validator: validator,
-        style: const TextStyle(color: Colors.black87), // Consistent text style
+        style: const TextStyle(color: Colors.black87),
       ),
     );
   }
@@ -535,10 +562,10 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   // REFACTORIZADO: _buildDateFormField para el nuevo estilo
   Widget _buildDateFormField({
     required TextEditingController controller,
-    required String label, // Changed from labelText
-    required IconData icon, // Added icon parameter
+    required String label,
+    required IconData icon,
     required VoidCallback onTap,
-    String? Function(String?)? validator, // Changed validator to accept String?
+    String? Function(String?)? validator,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 8.0),
@@ -548,17 +575,15 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         onTap: onTap,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon,
-              color: const Color(0xFF5e3a1c)), // Icon for consistency
+          prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 0),
           labelStyle: const TextStyle(color: Color(0xFF5e3a1c)),
           floatingLabelBehavior: FloatingLabelBehavior.never,
-          suffixIcon: const Icon(Icons.chevron_right,
-              color: Colors.grey), // Chevron icon
+          suffixIcon: const Icon(Icons.chevron_right, color: Colors.grey),
         ),
         validator: validator,
-        style: const TextStyle(color: Colors.black87), // Consistent text style
+        style: const TextStyle(color: Colors.black87),
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
 import 'package:intl/intl.dart';
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class ReproductoraScreen extends StatefulWidget {
   const ReproductoraScreen({super.key});
@@ -17,12 +18,41 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final User? _currentUser = FirebaseAuth.instance.currentUser;
 
+  String? _currentRanchId;
+  bool _isLoadingRanch = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentRanchId();
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    if (_currentUser == null) return;
+    try {
+      final userDoc =
+          await _firestore.collection('users').doc(_currentUser!.uid).get();
+      if (mounted) {
+        setState(() {
+          _currentRanchId = userDoc.data()?['currentRanchId'];
+          _isLoadingRanch = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error cargando rancho: $e");
+      if (mounted) setState(() => _isLoadingRanch = false);
+    }
+  }
+
   // Obtenemos TODAS las hembras para poder filtrar localmente las preñadas y las reproductoras
   Stream<QuerySnapshot> _getHembras() {
-    if (_currentUser == null) return const Stream.empty();
+    if (_currentUser == null || _currentRanchId == null)
+      return const Stream.empty();
     return _firestore
         .collection('users')
         .doc(_currentUser!.uid)
+        .collection('ranches') // Nombre exacto de tu regla: 'ranches'
+        .doc(_currentRanchId)
         .collection('animals')
         .where('sex', isEqualTo: 'Hembra')
         .snapshots();
@@ -56,6 +86,8 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
         DocumentReference animalRef = _firestore
             .collection('users')
             .doc(_currentUser!.uid)
+            .collection('ranches')
+            .doc(_currentRanchId)
             .collection('animals')
             .doc(animal.id);
 
@@ -67,6 +99,8 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
         DocumentReference eventRef = _firestore
             .collection('users')
             .doc(_currentUser!.uid)
+            .collection('ranches')
+            .doc(_currentRanchId)
             .collection('calendarEvents')
             .doc();
         batch.set(eventRef, {
@@ -79,6 +113,26 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
         });
 
         await batch.commit();
+        DocumentSnapshot userDoc =
+            await _firestore.collection('users').doc(_currentUser!.uid).get();
+        bool notificationsEnabled = (userDoc.data()
+                as Map<String, dynamic>?)?['notificationsEnabled'] ??
+            true;
+
+        if (notificationsEnabled) {
+          // La alerta sonará 7 días antes del parto estimado
+          DateTime alertDate = estimatedBirth.subtract(const Duration(days: 7));
+
+          if (alertDate.isAfter(DateTime.now())) {
+            await NotificationService().scheduleNotification(
+              id: animal.id.hashCode,
+              title: '¡Parto Cercano! 🐄',
+              body:
+                  'La vaca ${animal.name} está a aprox. una semana de su fecha de parto.',
+              scheduledDate: alertDate,
+            );
+          }
+        }
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('¡Preñez agendada!'),
@@ -122,6 +176,8 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
                   DocumentReference animalRef = _firestore
                       .collection('users')
                       .doc(_currentUser!.uid)
+                      .collection('ranches')
+                      .doc(_currentRanchId)
                       .collection('animals')
                       .doc(animal.id);
 
@@ -133,6 +189,8 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
                   QuerySnapshot eventSnapshot = await _firestore
                       .collection('users')
                       .doc(_currentUser!.uid)
+                      .collection('ranches')
+                      .doc(_currentRanchId)
                       .collection('calendarEvents')
                       .where('animalId', isEqualTo: animal.id)
                       .where('category', isEqualTo: 'Parto')
@@ -142,6 +200,9 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
                     batch.delete(doc.reference);
                   }
                   await batch.commit();
+
+                  await NotificationService()
+                      .cancelNotification(animal.id.hashCode);
 
                   if (mounted)
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

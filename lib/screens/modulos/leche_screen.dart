@@ -5,6 +5,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
 import 'package:intl/intl.dart';
+import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 
 class LecheScreen extends StatefulWidget {
   const LecheScreen({super.key});
@@ -16,13 +17,41 @@ class LecheScreen extends StatefulWidget {
 class _LecheScreenState extends State<LecheScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final User? _currentUser = FirebaseAuth.instance.currentUser;
+  String? _currentRanchId;
+  bool _isLoadingRanch = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentRanchId();
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    if (_currentUser == null) return;
+    try {
+      final userDoc =
+          await _firestore.collection('users').doc(_currentUser!.uid).get();
+      if (userDoc.exists && mounted) {
+        setState(() {
+          _currentRanchId = userDoc.data()?['currentRanchId'];
+          _isLoadingRanch = false;
+        });
+      }
+    } catch (e) {
+      print("Error cargando ranchId: $e");
+      if (mounted) setState(() => _isLoadingRanch = false);
+    }
+  }
 
   // Stream para obtener las vacas lecheras
   Stream<QuerySnapshot> _getLecheAnimals() {
-    if (_currentUser == null) return const Stream.empty();
+    if (_currentUser == null || _currentRanchId == null)
+      return const Stream.empty();
     return _firestore
-        .collection('users')
-        .doc(_currentUser!.uid)
+        .collection('users') // <-- AGREGADO
+        .doc(_currentUser!.uid) // <-- AGREGADO
+        .collection('ranches')
+        .doc(_currentRanchId)
         .collection('animals')
         .where('purpose', isEqualTo: 'Leche')
         .snapshots();
@@ -88,8 +117,10 @@ class _LecheScreenState extends State<LecheScreen> {
 
                 try {
                   await _firestore
-                      .collection('users')
-                      .doc(_currentUser!.uid)
+                      .collection('users') // <-- AGREGADO
+                      .doc(_currentUser!.uid) // <-- AGREGADO
+                      .collection('ranches')
+                      .doc(_currentRanchId)
                       .collection('animals')
                       .doc(animal.id)
                       .update({
@@ -172,8 +203,10 @@ class _LecheScreenState extends State<LecheScreen> {
 
                   try {
                     await _firestore
-                        .collection('users')
-                        .doc(_currentUser!.uid)
+                        .collection('users') // <-- AGREGADO
+                        .doc(_currentUser!.uid) // <-- AGREGADO
+                        .collection('ranches')
+                        .doc(_currentRanchId)
                         .collection('animals')
                         .doc(animal.id)
                         .update({
@@ -184,7 +217,9 @@ class _LecheScreenState extends State<LecheScreen> {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('¡Ordeña registrada!'),
                           backgroundColor: Colors.green));
-                  } catch (e) {}
+                  } catch (e) {
+                    print("Error registrando ordeña: $e");
+                  }
                 }
               },
               child:
@@ -198,6 +233,16 @@ class _LecheScreenState extends State<LecheScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingRanch) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_currentRanchId == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Producción Lechera')),
+        body: const Center(child: Text('No tienes un rancho seleccionado.')),
+      );
+    }
     return DefaultTabController(
       length: 2,
       child: Scaffold(

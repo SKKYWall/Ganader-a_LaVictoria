@@ -112,10 +112,34 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
     }
 
     try {
+      // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
+      // 1. Obtener el rancho seleccionado actual
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      if (currentRanchId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('No hay rancho seleccionado para guardar el movimiento.'),
+            backgroundColor: Colors.red,
+          ));
+        }
+        return; // Detenemos el guardado si no hay rancho
+      }
+
+      // 2. Apuntar a la subcolección del rancho
       final transactionsCollection = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
+          .collection('ranches') // <-- NUEVO
+          .doc(currentRanchId) // <-- NUEVO
           .collection('transactions');
+      // --- FIN DE MODIFICACIÓN MULTI-RANCHO ---
 
       final transactionData = Transaction(
         id: widget.transaction?.id ?? '',
@@ -272,6 +296,7 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
               _buildTextField(
                 controller: _amountController,
                 label: 'Monto', // Changed labelText to label
+                maxLength: 10,
                 icon: Icons.attach_money, // Added icon
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
@@ -322,6 +347,7 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
               _buildTextField(
                 controller: _notesController,
                 label: 'Observaciones (Opcional)',
+                maxLength: 250,
                 icon: Icons.notes, // Added icon
                 maxLines: 3,
                 validator: null, // Notas son opcionales
@@ -376,6 +402,7 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
     required IconData icon, // Added icon parameter
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
+    int? maxLength,
     String? Function(String?)? validator,
   }) {
     return Padding(
@@ -386,6 +413,7 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
         controller: controller,
         keyboardType: keyboardType,
         maxLines: maxLines,
+        maxLength: maxLength,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon,

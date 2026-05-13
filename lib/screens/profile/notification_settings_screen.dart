@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -68,42 +69,34 @@ class _NotificationSettingsScreenState
 
   Future<void> _updateNotificationSetting(bool value) async {
     setState(() {
-      _isLoading = true;
+      _notificationsEnabled = value;
     });
 
     try {
       if (_currentUser == null) return;
 
-      // Actualizar el campo 'notificationsEnabled' en el documento del usuario
-      await _firestore.collection('users').doc(_currentUser!.uid).set(
-        {'notificationsEnabled': value},
-        SetOptions(
-            merge:
-                true), // 'merge: true' fusiona los datos sin sobrescribir todo el documento
-      );
+      // Si el usuario ACTIVA las notificaciones, pedimos el permiso al celular
+      if (value) {
+        await NotificationService().requestPermissions();
+      }
 
-      if (!mounted) return;
-      setState(() {
-        _notificationsEnabled = value;
-      });
+      await _firestore
+          .collection('users')
+          .doc(_currentUser!.uid)
+          .set({'notificationsEnabled': value}, SetOptions(merge: true));
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(
-                'Notificaciones ${value ? 'activadas' : 'desactivadas'} exitosamente.')),
+          content: Text(value
+              ? 'Notificaciones activadas. Recibirás alertas.'
+              : 'Notificaciones desactivadas.'),
+          backgroundColor: const Color(0xFFc99450),
+        ),
       );
     } catch (e) {
-      print('Error al actualizar la configuración de notificaciones: $e');
-      if (!mounted) return;
-      _errorMessage = 'Error al guardar la configuración: ${e.toString()}';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content:
-                Text('Error al guardar la configuración: ${e.toString()}')),
-      );
-    } finally {
-      if (!mounted) return;
+      // Manejo de errores
       setState(() {
-        _isLoading = false;
+        _notificationsEnabled = !value; // Revertir en caso de error
       });
     }
   }

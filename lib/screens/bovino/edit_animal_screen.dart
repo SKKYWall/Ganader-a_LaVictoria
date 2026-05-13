@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class EditAnimalScreen extends StatefulWidget {
   final String animalId;
@@ -114,12 +115,33 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
   Future<void> _loadAnimalData() async {
     final user = _auth.currentUser;
     if (user != null) {
+      // --- INICIO DE MODIFICACIÓN: Buscar en el rancho actual ---
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      if (currentRanchId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('No hay un rancho seleccionado.'),
+            backgroundColor: Colors.red,
+          ));
+          setState(() => _loading = false);
+          Navigator.pop(context); // Lo sacamos si no hay rancho
+        }
+        return;
+      }
+
       final doc = await _firestore
           .collection('users')
           .doc(user.uid)
+          .collection('ranches') // <-- NUEVO
+          .doc(currentRanchId) // <-- NUEVO
           .collection('animals')
           .doc(widget.animalId)
           .get();
+
       if (doc.exists && mounted) {
         final animal = Animal.fromFirestore(doc.data()!, doc.id);
         setState(() {
@@ -127,9 +149,23 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
           _earTagNumberController.text = animal.earTagNumber;
           _legNumberController.text = animal.legNumber ?? '';
           _registrationNumberController.text = animal.registrationNumber ?? '';
-          _selectedSex = animal.sex;
-          _selectedBreed = animal.breed;
-          _selectedPurpose = animal.purpose;
+          if (animal.sex != null && ['Macho', 'Hembra'].contains(animal.sex)) {
+            _selectedSex = animal.sex;
+          } else {
+            _selectedSex =
+                'Hembra'; // Valor por defecto si viene nulo o con un error
+          }
+          if (animal.breed != null && _breeds.contains(animal.breed)) {
+            _selectedBreed = animal.breed;
+          } else {
+            _selectedBreed =
+                'Otro'; // Si dice "Comercial" o no existe, lo forzamos a "Otro"
+          }
+          if (animal.purpose != null && _purposes.contains(animal.purpose)) {
+            _selectedPurpose = animal.purpose;
+          } else {
+            _selectedPurpose = 'Reproductora'; // Valor por defecto seguro
+          }
           if (animal.birthDate != null)
             _birthDateController.text =
                 DateFormat('dd/MM/yyyy').format(animal.birthDate!);
@@ -276,12 +312,59 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                 : null,
           };
 
+          DocumentSnapshot userDoc =
+              await _firestore.collection('users').doc(user.uid).get();
+          String? currentRanchId =
+              (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+          if (currentRanchId == null) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('No hay rancho seleccionado.'),
+                  backgroundColor: Colors.red));
+            }
+            return;
+          }
+
           await _firestore
               .collection('users')
               .doc(user.uid)
+              .collection('ranches')
+              .doc(currentRanchId)
               .collection('animals')
               .doc(widget.animalId)
               .update(updateData);
+
+          if (isPregnantData && pregnancyDateData != null) {
+            bool notificationsEnabled = (userDoc.data()
+                    as Map<String, dynamic>?)?['notificationsEnabled'] ??
+                true;
+
+            if (notificationsEnabled) {
+              DateTime alertDate =
+                  pregnancyDateData.add(const Duration(days: 276));
+
+              if (alertDate.isAfter(DateTime.now())) {
+                // Al mandar a programar una alarma con el MISMO ID, el celular BORRA la vieja y pone esta nueva
+                await NotificationService().scheduleNotification(
+                  id: widget.animalId.hashCode,
+                  title: '¡Parto Cercano! 🐄',
+                  body:
+                      'La vaca ${_nameController.text.trim()} está a aprox. una semana de su fecha de parto.',
+                  scheduledDate: alertDate,
+                );
+              } else {
+                // Si la nueva fecha editada es del pasado, cancelamos cualquier alarma vieja que tuviera
+                await NotificationService()
+                    .cancelNotification(widget.animalId.hashCode);
+              }
+            }
+          } else {
+            // Si el usuario le quitó el estado de "Gestante", cancelamos la alarma definitivamente
+            await NotificationService()
+                .cancelNotification(widget.animalId.hashCode);
+          }
+          // --- FIN NUEVO CÓDIGO ---
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Animal actualizado correctamente'),
@@ -319,6 +402,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
       bool readOnly = false,
       VoidCallback? onTap,
       int maxLines = 1,
+      int? maxLength,
       String? Function(String?)? validator,
       List<TextInputFormatter>? inputFormatters}) {
     return Container(
@@ -334,6 +418,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                 offset: const Offset(0, 3))
           ]),
       child: TextFormField(
+        maxLength: maxLength,
         controller: controller,
         keyboardType: keyboardType,
         readOnly: readOnly,
@@ -551,6 +636,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                             controller: _nameController,
                             label: 'Nombre o Alias',
                             icon: Icons.abc,
+                            maxLength: 15,
                             validator: (value) => value == null || value.isEmpty
                                 ? 'Requerido'
                                 : null),
@@ -558,12 +644,14 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                             controller: _earTagNumberController,
                             label: 'Número de Arete',
                             icon: FontAwesomeIcons.tag,
+                            maxLength: 15,
                             validator: (value) => value == null || value.isEmpty
                                 ? 'Requerido'
                                 : null),
                         _buildFancyInputField(
                             controller: _legNumberController,
                             label: 'Número de Pierna',
+                            maxLength: 15,
                             icon: FontAwesomeIcons.hashtag),
                         _buildFancyDropdownField(
                             value: _selectedBreed,
@@ -596,6 +684,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                         _buildFancyInputField(
                             controller: _registrationNumberController,
                             label: 'Número de Registro',
+                            maxLength: 15,
                             icon: Icons.app_registration),
                         _buildFancyDropdownField(
                             value: _selectedPurpose,
@@ -627,6 +716,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                             icon: Icons.line_weight,
                             keyboardType: const TextInputType.numberWithOptions(
                                 decimal: true),
+                            maxLength: 15,
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
                                   RegExp(r'^\d+\.?\d{0,2}'))
@@ -637,6 +727,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                             icon: Icons.line_weight,
                             keyboardType: const TextInputType.numberWithOptions(
                                 decimal: true),
+                            maxLength: 15,
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
                                   RegExp(r'^\d+\.?\d{0,2}'))
@@ -659,10 +750,12 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                         _buildFancyInputField(
                             controller: _fatherController,
                             label: 'Arete del Padre',
+                            maxLength: 15,
                             icon: FontAwesomeIcons.person),
                         _buildFancyInputField(
                             controller: _motherController,
                             label: 'Arete de la Madre',
+                            maxLength: 15,
                             icon: FontAwesomeIcons.personDress),
                       ],
                     ),
@@ -683,15 +776,18 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                             controller: _diseaseResistanceController,
                             label: 'Resistencia a enfermedades',
                             icon: Icons.health_and_safety,
+                            maxLength: 250,
                             maxLines: 3),
                         _buildFancyInputField(
                             controller: _fertilityInfoController,
                             label: 'Información de fertilidad',
+                            maxLength: 250,
                             icon: FontAwesomeIcons.seedling,
                             maxLines: 3),
                         _buildFancyInputField(
                             controller: _geneticMarkersController,
                             label: 'Marcadores genéticos',
+                            maxLength: 250,
                             icon: FontAwesomeIcons.dna,
                             maxLines: 3),
                       ],
@@ -749,6 +845,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                         _buildFancyInputField(
                             controller: _descriptionController,
                             label: 'Descripción',
+                            maxLength: 250,
                             icon: Icons.description,
                             maxLines: 5),
                       ],

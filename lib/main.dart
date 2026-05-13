@@ -38,11 +38,13 @@ import 'package:manual_ganadero_flutter/screens/modulos/sanidad_screen.dart'; //
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:manual_ganadero_flutter/screens/profile/ranch_setup_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await initializeDateFormatting('es_MX', null);
+  await NotificationService().init();
   runApp(const MyApp());
 }
 

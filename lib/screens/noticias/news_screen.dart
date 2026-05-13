@@ -30,13 +30,27 @@ class NewsScreen extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      // AQUÍ ESTÁ LA MAGIA: Escuchamos a Firebase en tiempo real
+      // Escuchamos a Firebase en tiempo real
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
-            .collection('global_news') // Colección donde estarán tus noticias
-            .orderBy('date', descending: true) // Las más nuevas primero
+            .collection('global_news')
+            .orderBy('date', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
+          // --- ESTO TE AVISARÁ SI TE FALTAN REGLAS EN FIREBASE ---
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(
+                  'Error de Firebase:\n${snapshot.error}',
+                  style: const TextStyle(color: Colors.red, fontSize: 16),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
+
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
                 child: CircularProgressIndicator(color: Color(0xFFc99450)));

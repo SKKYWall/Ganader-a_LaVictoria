@@ -8,6 +8,7 @@ import 'package:manual_ganadero_flutter/models/animal.dart'; // ¡Importa tu mod
 import 'package:intl/intl.dart'; // Para formatear fechas
 import 'package:manual_ganadero_flutter/screens/bovino/edit_animal_screen.dart'; // Asegúrate de importar tu EditAnimalScreen
 import 'package:firebase_storage/firebase_storage.dart'; // Importar para Firebase Storage para eliminar imagen
+import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 
 class AnimalDetailScreen extends StatefulWidget {
   final String animalId; // Recibimos el ID del animal
@@ -52,13 +53,31 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
     }
 
     try {
+      // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      if (currentRanchId == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay rancho seleccionado.')),
+        );
+        setState(() => _isLoading = false);
+        return;
+      }
+
       _firestore
           .collection('users')
           .doc(user.uid)
+          .collection('ranches') // <-- NUEVO
+          .doc(currentRanchId) // <-- NUEVO
           .collection('animals')
           .doc(widget.animalId)
-          .snapshots() // Usar snapshots para actualizaciones en tiempo real
+          .snapshots()
           .listen((docSnapshot) {
+        // --- FIN DE MODIFICACIÓN ---
         if (!mounted) return;
         if (docSnapshot.exists && docSnapshot.data() != null) {
           setState(() {
@@ -74,7 +93,7 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Animal no encontrado.')),
           );
-          Navigator.of(context).pop(); // Volver si el animal no existe
+          Navigator.of(context).pop();
         }
       });
     } catch (e) {
@@ -196,13 +215,22 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
           }
         }
 
-        // Eliminar el documento del animal
-        await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('animals')
-            .doc(widget.animalId)
-            .delete();
+        DocumentSnapshot userDoc =
+            await _firestore.collection('users').doc(user.uid).get();
+        String? currentRanchId =
+            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+        if (currentRanchId != null) {
+          // Eliminar el documento del animal
+          await _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('ranches') // <-- NUEVO
+              .doc(currentRanchId) // <-- NUEVO
+              .collection('animals')
+              .doc(widget.animalId)
+              .delete();
+        }
 
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -478,14 +506,25 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
           };
         }
 
-        await _firestore
+        DocumentSnapshot userDoc = await _firestore
             .collection('users')
             .doc(_auth.currentUser!.uid)
-            .collection('animals')
-            .doc(widget.animalId)
-            .update({
-          'vaccinations': FieldValue.arrayRemove([recordToRemove])
-        });
+            .get();
+        String? currentRanchId =
+            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+        if (currentRanchId != null) {
+          await _firestore
+              .collection('users')
+              .doc(_auth.currentUser!.uid)
+              .collection('ranches') // <-- NUEVO
+              .doc(currentRanchId) // <-- NUEVO
+              .collection('animals')
+              .doc(widget.animalId)
+              .update({
+            'vaccinations': FieldValue.arrayRemove([recordToRemove])
+          });
+        }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -508,10 +547,17 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
       final user = _auth.currentUser;
       if (user == null) return;
 
-      // 1. Leemos el documento crudo de Firebase para buscar fechas ocultas (expiresAt)
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+      if (currentRanchId == null) return;
+
       DocumentSnapshot doc = await _firestore
           .collection('users')
           .doc(user.uid)
+          .collection('ranches') // <-- NUEVO
+          .doc(currentRanchId) // <-- NUEVO
           .collection('animals')
           .doc(widget.animalId)
           .get();
@@ -539,6 +585,8 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
         await _firestore
             .collection('users')
             .doc(user.uid)
+            .collection('ranches') // <-- NUEVO
+            .doc(currentRanchId) // <-- NUEVO
             .collection('animals')
             .doc(widget.animalId)
             .update({'vaccinations': FieldValue.arrayRemove(vaccinesToRemove)});

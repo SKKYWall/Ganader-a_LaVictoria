@@ -5,6 +5,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
 import 'package:intl/intl.dart';
+import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 
 class EngordaScreen extends StatefulWidget {
   const EngordaScreen({super.key});
@@ -17,15 +18,44 @@ class _EngordaScreenState extends State<EngordaScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final User? _currentUser = FirebaseAuth.instance.currentUser;
 
-  final double pesoMeta = 500.0;
+  String? _currentRanchId;
+  bool _isLoadingRanch = true;
+
   final double estimacionCanal = 0.58;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentRanchId(); // Cargamos el rancho al iniciar
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    if (_currentUser == null) return;
+    try {
+      final doc =
+          await _firestore.collection('users').doc(_currentUser!.uid).get();
+      if (mounted) {
+        setState(() {
+          _currentRanchId =
+              (doc.data() as Map<String, dynamic>?)?['currentRanchId'];
+          _isLoadingRanch = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingRanch = false);
+    }
+  }
 
   // Traemos a los animales de ambos propósitos
   Stream<QuerySnapshot> _getAnimals() {
-    if (_currentUser == null) return const Stream.empty();
+    if (_currentUser == null || _currentRanchId == null) {
+      return const Stream.empty();
+    }
     return _firestore
         .collection('users')
         .doc(_currentUser!.uid)
+        .collection('ranches') // Agregado
+        .doc(_currentRanchId) // Agregado
         .collection('animals')
         .where('purpose', whereIn: ['Engorda', 'Carne']).snapshots();
   }
@@ -55,6 +85,94 @@ class _EngordaScreenState extends State<EngordaScreen> {
     return (last.value - first.value) / days;
   }
 
+  // --- NUEVA FUNCIÓN: EDITAR META DE PESO DE UN ANIMAL ---
+  Future<void> _showEditTargetWeightDialog(
+      String animalId, double currentTarget, String animalName) async {
+    final TextEditingController weightController =
+        TextEditingController(text: currentTarget.toString());
+    bool isSaving = false;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFFfbf6ec),
+              title: Text('Meta para $animalName',
+                  style: const TextStyle(
+                      color: Color(0xFF5e3a1c), fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                      'Define el peso ideal al que deseas llevar este animal.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey)),
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: weightController,
+                    maxLength: 10,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'Peso Meta (kg)',
+                      prefixIcon: const Icon(Icons.monitor_weight,
+                          color: Color(0xFFc99450)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.pop(context),
+                  child: const Text('Cancelar',
+                      style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFc99450)),
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final double? newWeight =
+                              double.tryParse(weightController.text.trim());
+                          if (newWeight != null && newWeight > 0) {
+                            setStateDialog(() => isSaving = true);
+                            try {
+                              await _firestore
+                                  .collection('users')
+                                  .doc(_currentUser!.uid)
+                                  .collection('ranches')
+                                  .doc(_currentRanchId)
+                                  .collection('animals')
+                                  .doc(animalId)
+                                  .set({'targetWeight': newWeight},
+                                      SetOptions(merge: true));
+                              if (mounted) Navigator.pop(context);
+                            } catch (e) {
+                              setStateDialog(() => isSaving = false);
+                            }
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Text('Guardar',
+                          style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   // --- FUNCIÓN: PASAR A CARNE ---
   void _moverACarne(Animal animal) {
     showDialog(
@@ -78,13 +196,16 @@ class _EngordaScreenState extends State<EngordaScreen> {
                     await _firestore
                         .collection('users')
                         .doc(_currentUser!.uid)
+                        .collection('ranches') // Agregado
+                        .doc(_currentRanchId) // Agregado
                         .collection('animals')
                         .doc(animal.id)
                         .update({'purpose': 'Carne'});
-                    if (mounted)
+                    if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('Animal movido a Producción de Carne'),
                           backgroundColor: Colors.green));
+                    }
                   },
                   child: const Text('Sí, Mover',
                       style: TextStyle(color: Colors.white)),
@@ -132,15 +253,18 @@ class _EngordaScreenState extends State<EngordaScreen> {
                       await _firestore
                           .collection('users')
                           .doc(_currentUser!.uid)
+                          .collection('ranches') // Agregado
+                          .doc(_currentRanchId) // Agregado
                           .collection('animals')
                           .doc(animal.id)
                           .delete();
                       if (mounted) Navigator.pop(context);
-                      if (mounted)
+                      if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                             content: Text(
                                 'Animal procesado y eliminado del inventario exitosamente.'),
                             backgroundColor: Colors.green));
+                      }
                     } catch (e) {
                       if (mounted) Navigator.pop(context);
                     }
@@ -208,6 +332,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
                   const SizedBox(height: 20),
                   TextFormField(
                       controller: pesoVivoController,
+                      maxLength: 10,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
@@ -219,6 +344,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
                   const SizedBox(height: 15),
                   TextFormField(
                       controller: pesoCanalController,
+                      maxLength: 10,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
@@ -294,6 +420,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
                     const SizedBox(height: 20),
                     TextFormField(
                         controller: weightController,
+                        maxLength: 10,
                         keyboardType: const TextInputType.numberWithOptions(
                             decimal: true),
                         decoration: InputDecoration(
@@ -318,6 +445,8 @@ class _EngordaScreenState extends State<EngordaScreen> {
                           await _firestore
                               .collection('users')
                               .doc(_currentUser!.uid)
+                              .collection('ranches') // Agregado
+                              .doc(_currentRanchId) // Agregado
                               .collection('animals')
                               .doc(animal.id)
                               .update({
@@ -348,6 +477,15 @@ class _EngordaScreenState extends State<EngordaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingRanch) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_currentRanchId == null) {
+      return const Scaffold(
+          body: Center(
+              child: Text("Por favor selecciona un rancho en tu perfil")));
+    }
     return DefaultTabController(
       length: 2,
       child: Scaffold(
@@ -377,28 +515,40 @@ class _EngordaScreenState extends State<EngordaScreen> {
         body: StreamBuilder<QuerySnapshot>(
           stream: _getAnimals(),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting)
+            if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
                   child: CircularProgressIndicator(color: Color(0xFFc99450)));
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
               return const Center(
                   child: Text('No hay animales en este flujo de producción.',
                       style: TextStyle(color: Colors.grey)));
+            }
 
-            List<Animal> allAnimals = snapshot.data!.docs.map((doc) {
+            // --- LECTURA DE DATOS ACTUALIZADA ---
+            List<Animal> allAnimals = [];
+            List<Map<String, dynamic>> animalRawData = [];
+
+            for (var doc in snapshot.data!.docs) {
               Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-              return Animal.fromFirestore(data, doc.id);
-            }).toList();
+              allAnimals.add(Animal.fromFirestore(data, doc.id));
+              animalRawData
+                  .add(data); // Guardamos la data cruda para leer targetWeight
+            }
 
-            List<Animal> engordaAnimals =
-                allAnimals.where((a) => a.purpose == 'Engorda').toList();
-            List<Animal> carneAnimals =
-                allAnimals.where((a) => a.purpose == 'Carne').toList();
+            // Separamos por propósitos
+            List<int> engordaIndexes = [];
+            List<int> carneIndexes = [];
+
+            for (int i = 0; i < allAnimals.length; i++) {
+              if (allAnimals[i].purpose == 'Engorda') engordaIndexes.add(i);
+              if (allAnimals[i].purpose == 'Carne') carneIndexes.add(i);
+            }
 
             return TabBarView(
               children: [
-                _buildEngordaTab(engordaAnimals),
-                _buildCarneTab(carneAnimals),
+                _buildEngordaTab(engordaIndexes, allAnimals, animalRawData),
+                _buildCarneTab(carneIndexes, allAnimals),
               ],
             );
           },
@@ -408,20 +558,29 @@ class _EngordaScreenState extends State<EngordaScreen> {
   }
 
   // --- PESTAÑA 1: ENGORDA ---
-  Widget _buildEngordaTab(List<Animal> animals) {
-    if (animals.isEmpty)
+  Widget _buildEngordaTab(List<int> indexes, List<Animal> allAnimals,
+      List<Map<String, dynamic>> rawData) {
+    if (indexes.isEmpty) {
       return const Center(
           child: Text('No hay animales en engorda.',
               style: TextStyle(color: Colors.grey)));
+    }
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: animals.length,
-      itemBuilder: (context, index) {
-        Animal animal = animals[index];
+      itemCount: indexes.length,
+      itemBuilder: (context, i) {
+        int originalIndex = indexes[i];
+        Animal animal = allAnimals[originalIndex];
+        Map<String, dynamic> data = rawData[originalIndex];
+
+        // Leemos la meta específica (500.0 por defecto si no existe)
+        double pesoMeta = (data['targetWeight'] as num?)?.toDouble() ?? 500.0;
+
         double ultimoPeso = _getUltimoPeso(animal);
         double gdp = _calcularGDP(animal);
-        double progreso = (ultimoPeso / pesoMeta).clamp(0.0, 1.0);
-        bool llegoMeta = ultimoPeso >= pesoMeta;
+        double progreso =
+            pesoMeta > 0 ? (ultimoPeso / pesoMeta).clamp(0.0, 1.0) : 0.0;
+        bool llegoMeta = ultimoPeso >= pesoMeta && pesoMeta > 0;
 
         return Card(
           elevation: 2,
@@ -456,28 +615,65 @@ class _EngordaScreenState extends State<EngordaScreen> {
                                   AnimalDetailScreen(animalId: animal.id)))),
                 ),
                 const SizedBox(height: 10),
+
+                // --- NUEVA SECCIÓN: BARRA DE PROGRESO Y BOTÓN META ---
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('${ultimoPeso.toStringAsFixed(1)} kg',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: LinearProgressIndicator(
-                                value: progreso,
-                                minHeight: 12,
-                                backgroundColor: Colors.grey.shade200,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                    llegoMeta
-                                        ? Colors.green
-                                        : const Color(0xFFc99450))))),
-                    const SizedBox(width: 10),
-                    Text('${pesoMeta.toInt()} kg',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.grey)),
+                    Text(
+                      'Progreso: ${(progreso * 100).toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    InkWell(
+                      onTap: () => _showEditTargetWeightDialog(
+                          animal.id, pesoMeta, animal.name),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFc99450).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Meta: ${pesoMeta.toStringAsFixed(0)} kg',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFFc99450),
+                                  fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(width: 5),
+                            const Icon(Icons.edit,
+                                size: 14, color: Color(0xFFc99450)),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
+                const SizedBox(height: 5),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: LinearProgressIndicator(
+                    value: progreso,
+                    minHeight: 12,
+                    backgroundColor: Colors.grey.shade200,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                        llegoMeta ? Colors.green : const Color(0xFFc99450)),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Actual: ${ultimoPeso.toStringAsFixed(1)} kg',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: Colors.grey)),
+                ),
+
                 const SizedBox(height: 20),
                 Row(
                   children: [
@@ -519,15 +715,16 @@ class _EngordaScreenState extends State<EngordaScreen> {
   }
 
   // --- PESTAÑA 2: CARNE (LISTOS PARA RASTRO) ---
-  Widget _buildCarneTab(List<Animal> animals) {
-    if (animals.isEmpty)
+  Widget _buildCarneTab(List<int> indexes, List<Animal> allAnimals) {
+    if (indexes.isEmpty) {
       return const Center(
           child: Text('No hay animales listos para procesar.',
               style: TextStyle(color: Colors.grey)));
+    }
 
     double pesoVivoTotal = 0;
-    for (var a in animals) {
-      pesoVivoTotal += _getUltimoPeso(a);
+    for (var index in indexes) {
+      pesoVivoTotal += _getUltimoPeso(allAnimals[index]);
     }
     double carneEstimada = pesoVivoTotal * estimacionCanal;
 
@@ -559,7 +756,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildSummaryStat('Cabezas', animals.length.toString()),
+                    _buildSummaryStat('Cabezas', indexes.length.toString()),
                     Container(width: 1, height: 40, color: Colors.white30),
                     _buildSummaryStat(
                         'Peso Total', '${pesoVivoTotal.toStringAsFixed(0)} kg'),
@@ -577,8 +774,8 @@ class _EngordaScreenState extends State<EngordaScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                Animal animal = animals[index];
+              (context, i) {
+                Animal animal = allAnimals[indexes[i]];
                 double pesoVivo = _getUltimoPeso(animal);
                 double canalEst = pesoVivo * estimacionCanal;
 
@@ -653,7 +850,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
                   ),
                 );
               },
-              childCount: animals.length,
+              childCount: indexes.length,
             ),
           ),
         ),

@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/import_animals_screen.dart'; // <-- AGREGA ESTO
+import 'package:manual_ganadero_flutter/services/notification_service.dart'; // Ajusta la ruta si es necesario
 
 class RegisterAnimalScreen extends StatefulWidget {
   const RegisterAnimalScreen({super.key});
@@ -257,11 +258,56 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
         purpose: _selectedPurpose,
       );
 
-      await _firestore
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      // 2. Si no hay rancho seleccionado, mostramos error y detenemos el guardado
+      if (currentRanchId == null) {
+        if (!mounted) return;
+        _showSnackBar(
+            'No tienes un rancho seleccionado. Ve al inicio y selecciona uno.');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      // 3. Guardamos en la subcolección del rancho activo
+      // 3. Guardamos en la subcolección del rancho activo y guardamos su Referencia (ID)
+      DocumentReference newAnimalRef = await _firestore
           .collection('users')
           .doc(user.uid)
+          .collection('ranches')
+          .doc(currentRanchId)
           .collection('animals')
           .add(newAnimal.toFirestore());
+
+      // --- NUEVO: PROGRAMAR ALERTA DE PARTO AUTOMÁTICA ---
+      // Usamos las variables isPregnantData y pregnancyDateData que ya declaraste arriba
+      if (isPregnantData && pregnancyDateData != null) {
+        // Revisamos si el usuario quiere recibir notificaciones (leemos del userDoc que ya consultaste)
+        bool notificationsEnabled = (userDoc.data()
+                as Map<String, dynamic>?)?['notificationsEnabled'] ??
+            true;
+
+        if (notificationsEnabled) {
+          // Calculamos la fecha: 283 días (gestación) - 7 días (aviso previo) = 276 días
+          DateTime alertDate = pregnancyDateData.add(const Duration(days: 276));
+
+          // Solo programamos si la alerta va a sonar en el futuro
+          if (alertDate.isAfter(DateTime.now())) {
+            await NotificationService().scheduleNotification(
+              id: newAnimalRef
+                  .id.hashCode, // Usamos el ID de Firebase convertido a número
+              title: '¡Parto Cercano! 🐄',
+              body:
+                  'La vaca ${_nameController.text.trim()} está a aprox. una semana de su fecha de parto.',
+              scheduledDate: alertDate,
+            );
+          }
+        }
+      }
+      // --- FIN NUEVO CÓDIGO ---
 
       if (!mounted) return;
       _showSnackBar('Animal registrado exitosamente!');
@@ -288,6 +334,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
     int maxLines = 1,
     String? Function(String?)? validator,
     List<TextInputFormatter>? inputFormatters,
+    int? maxLength,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 15.0),
@@ -305,6 +352,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
         controller: controller,
         keyboardType: keyboardType,
         maxLines: maxLines,
+        maxLength: maxLength,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
@@ -589,10 +637,12 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                         _buildFancyInputField(
                             controller: _nameController,
                             label: 'Nombre del animal',
+                            maxLength: 15,
                             icon: Icons.abc),
                         _buildFancyInputField(
                             controller: _earTagNumberController,
                             label: 'Número de arete',
+                            maxLength: 15,
                             icon: FontAwesomeIcons.tag,
                             validator: (value) => value == null || value.isEmpty
                                 ? 'Por favor, ingresa el número de arete'
@@ -600,6 +650,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                         _buildFancyInputField(
                             controller: _legNumberController,
                             label: 'Número de pierna',
+                            maxLength: 15,
                             icon: FontAwesomeIcons.hashtag,
                             validator: (value) => value == null || value.isEmpty
                                 ? 'Por favor, ingresa el número de pierna'
@@ -653,6 +704,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                         _buildFancyInputField(
                             controller: _registrationNumberController,
                             label: 'Número de registro',
+                            maxLength: 15,
                             icon: Icons.app_registration),
                       ],
                     ),
@@ -673,6 +725,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                             controller: _birthWeightController,
                             label: 'Peso al nacer (kg)',
                             icon: Icons.line_weight,
+                            maxLength: 15,
                             keyboardType: TextInputType.number,
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
@@ -687,6 +740,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                             controller: _weaningWeightController,
                             label: 'Peso al destete (kg)',
                             icon: Icons.line_weight,
+                            maxLength: 15,
                             keyboardType: TextInputType.number,
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
@@ -715,10 +769,12 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                         _buildFancyInputField(
                             controller: _fatherController,
                             label: 'Arete del Padre',
+                            maxLength: 15,
                             icon: FontAwesomeIcons.person),
                         _buildFancyInputField(
                             controller: _motherController,
                             label: 'Arete de la Madre',
+                            maxLength: 15,
                             icon: FontAwesomeIcons.personDress),
                       ],
                     ),
@@ -738,16 +794,19 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                         _buildFancyInputField(
                             controller: _diseaseResistanceController,
                             label: 'Resistencia a enfermedades',
+                            maxLength: 250,
                             icon: Icons.health_and_safety,
                             maxLines: 3),
                         _buildFancyInputField(
                             controller: _fertilityInfoController,
                             label: 'Información de fertilidad',
+                            maxLength: 250,
                             icon: FontAwesomeIcons.seedling,
                             maxLines: 3),
                         _buildFancyInputField(
                             controller: _geneticMarkersController,
                             label: 'Marcadores genéticos',
+                            maxLength: 250,
                             icon: FontAwesomeIcons.dna,
                             maxLines: 3),
                       ],
@@ -816,6 +875,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                         _buildFancyInputField(
                             controller: _descriptionController,
                             label: 'Descripción',
+                            maxLength: 250,
                             icon: Icons.description,
                             maxLines: 5),
                       ],

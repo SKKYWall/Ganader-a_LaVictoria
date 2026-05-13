@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:manual_ganadero_flutter/models/calendar.dart'; // Importa el modelo CalendarEvent
 import 'package:intl/intl.dart'; // Para formatear la fecha
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class AddEditEventScreen extends StatefulWidget {
   final CalendarEvent? event; // Si se pasa un evento, es para editar
@@ -64,6 +65,26 @@ class _AddEditEventScreenState extends State<AddEditEventScreen> {
       if (user == null) return;
 
       try {
+        // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
+        // 1. Obtener el rancho seleccionado actual
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        String? currentRanchId =
+            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+        if (currentRanchId == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content:
+                  Text('No hay rancho seleccionado para guardar el evento.'),
+              backgroundColor: Colors.red,
+            ));
+          }
+          return; // Detenemos el guardado si no hay rancho
+        }
+
         final newEvent = CalendarEvent(
           id: widget.event?.id ??
               '', // ID vacío si es nuevo, si no, el ID existente
@@ -73,22 +94,68 @@ class _AddEditEventScreenState extends State<AddEditEventScreen> {
           category: _selectedCategory,
         );
 
+        // 2. Creamos la referencia a la base de datos apuntando al rancho actual
+        // 2. Creamos la referencia a la base de datos apuntando al rancho actual
+        CollectionReference eventsRef = FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('ranches')
+            .doc(currentRanchId)
+            .collection('calendarEvents');
+
+        String eventIdToUse = '';
+
         if (widget.event == null) {
-          // Añadir nuevo evento
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .collection('calendarEvents')
-              .add(newEvent.toFirestore());
+          // Añadir nuevo evento y guardar su ID
+          DocumentReference docRef =
+              await eventsRef.add(newEvent.toFirestore());
+          eventIdToUse = docRef.id;
         } else {
           // Actualizar evento existente
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .collection('calendarEvents')
-              .doc(widget.event!.id)
-              .update(newEvent.toFirestore());
+          eventIdToUse = widget.event!.id;
+          await eventsRef.doc(eventIdToUse).update(newEvent.toFirestore());
         }
+
+        // --- NUEVO: PROGRAMAR ALERTA DE CALENDARIO ---
+        try {
+          bool notificationsEnabled = (userDoc.data()
+                  as Map<String, dynamic>?)?['notificationsEnabled'] ??
+              true;
+
+          if (notificationsEnabled) {
+            // Programar la alarma para las 8:00 AM del día del evento
+            DateTime alertDate = DateTime(
+              _selectedDate.year,
+              _selectedDate.month,
+              _selectedDate.day,
+              8, 0, // 8:00 AM
+            );
+
+            if (alertDate.isAfter(DateTime.now())) {
+              await NotificationService().scheduleNotification(
+                id: eventIdToUse.hashCode,
+                title: '📅 ${_titleController.text.trim()}',
+                body: _descriptionController.text.trim().isNotEmpty
+                    ? _descriptionController.text.trim()
+                    : 'Tienes un evento programado para hoy en tu rancho.',
+                scheduledDate: alertDate,
+              );
+            } else {
+              // Si la fecha editada es del pasado, cancelamos cualquier alarma vieja
+              await NotificationService()
+                  .cancelNotification(eventIdToUse.hashCode);
+            }
+          } else {
+            // Si el usuario desactivó las notificaciones en ajustes, cancelamos por si acaso
+            await NotificationService()
+                .cancelNotification(eventIdToUse.hashCode);
+          }
+        } catch (notificationError) {
+          print(
+              'Advertencia: No se pudo programar la alarma local del celular: $notificationError');
+          // No hacemos return, dejamos que el código siga para que cierre la pantalla.
+        }
+        // --- FIN NUEVO CÓDIGO ---
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -179,6 +246,7 @@ class _AddEditEventScreenState extends State<AddEditEventScreen> {
               _buildTextField(
                 controller: _titleController,
                 label: 'Título del evento',
+                maxLength: 30,
                 icon: Icons.event_note, // Appropriate icon
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -190,6 +258,7 @@ class _AddEditEventScreenState extends State<AddEditEventScreen> {
               _buildTextField(
                 controller: _descriptionController,
                 label: 'Descripción (opcional)',
+                maxLength: 250,
                 icon: Icons.description, // Appropriate icon
                 maxLines: 3,
                 validator: null, // Optional field
@@ -261,6 +330,7 @@ class _AddEditEventScreenState extends State<AddEditEventScreen> {
     required IconData icon,
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
+    int? maxLength,
     String? Function(String?)? validator,
   }) {
     return Padding(
@@ -269,6 +339,7 @@ class _AddEditEventScreenState extends State<AddEditEventScreen> {
         controller: controller,
         keyboardType: keyboardType,
         maxLines: maxLines,
+        maxLength: maxLength,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),

@@ -23,24 +23,40 @@ class _FinanceScreenState extends State<FinanceScreen> {
   // Formateador de moneda
   final currencyFormat = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
 
+  // --- NUEVA FUNCIÓN PARA ABREVIAR NÚMEROS GRANDES ---
+  String _formatLargeAmount(double amount) {
+    double absAmount = amount.abs();
+    if (absAmount >= 1000000) {
+      return '${amount < 0 ? '-' : ''}\$${(absAmount / 1000000).toStringAsFixed(2)} M';
+    } else if (absAmount >= 10000) {
+      // A partir de 10,000 mostramos "k" para ahorrar espacio (ej. $15.5 k)
+      return '${amount < 0 ? '-' : ''}\$${(absAmount / 1000).toStringAsFixed(1)} k';
+    } else {
+      return currencyFormat.format(amount);
+    }
+  }
+
   // Obtener transacciones en tiempo real
-  Stream<QuerySnapshot> _getTransactionsStream() {
+  Stream<QuerySnapshot> _getTransactionsStream(String ranchId) {
     if (_currentUser == null) return const Stream.empty();
     return _firestore
         .collection('users')
         .doc(_currentUser!.uid)
+        .collection('ranches')
+        .doc(ranchId)
         .collection('transactions')
         .orderBy('date', descending: true)
         .snapshots();
   }
 
-  // NUEVO: Obtener el total de animales para calcular el Costo por Cabeza
-  Future<int> _getTotalAnimals() async {
+  Future<int> _getTotalAnimals(String ranchId) async {
     if (_currentUser == null) return 0;
     try {
       final snapshot = await _firestore
           .collection('users')
           .doc(_currentUser!.uid)
+          .collection('ranches')
+          .doc(ranchId)
           .collection('animals')
           .count()
           .get();
@@ -73,261 +89,335 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 color: Color(0xFF5e3a1c))),
         centerTitle: true,
       ),
-      body: FutureBuilder<int>(
-          future: _getTotalAnimals(),
-          builder: (context, animalSnapshot) {
-            int totalAnimals = animalSnapshot.data ?? 0;
-
-            return StreamBuilder<QuerySnapshot>(
-              stream: _getTransactionsStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+      body: _currentUser == null
+          ? const Center(child: Text('Usuario no autenticado'))
+          : StreamBuilder<DocumentSnapshot>(
+              stream: _firestore
+                  .collection('users')
+                  .doc(_currentUser!.uid)
+                  .snapshots(),
+              builder: (context, userSnapshot) {
+                if (userSnapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
                       child:
                           CircularProgressIndicator(color: Color(0xFFc99450)));
                 }
 
-                List<Transaction> allTransactions = [];
-                if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
-                  allTransactions = snapshot.data!.docs.map((doc) {
-                    return Transaction.fromFirestore(
-                        doc.data() as Map<String, dynamic>, doc.id);
-                  }).toList();
+                String? currentRanchId = (userSnapshot.data?.data()
+                    as Map<String, dynamic>?)?['currentRanchId'];
+
+                if (currentRanchId == null) {
+                  return const Center(
+                    child: Text(
+                        'Por favor, selecciona un rancho desde el Inicio.',
+                        style: TextStyle(color: Colors.grey, fontSize: 16)),
+                  );
                 }
 
-                DateTime now = DateTime.now();
-                List<Transaction> currentMonthTransactions =
-                    allTransactions.where((t) {
-                  return t.date.year == now.year && t.date.month == now.month;
-                }).toList();
+                return FutureBuilder<int>(
+                    future: _getTotalAnimals(currentRanchId),
+                    builder: (context, animalSnapshot) {
+                      int totalAnimals = animalSnapshot.data ?? 0;
 
-                double monthlyIncome = 0;
-                double monthlyExpense = 0;
-
-                for (var t in currentMonthTransactions) {
-                  if (t.type == 'income') monthlyIncome += t.amount;
-                  if (t.type == 'expense') monthlyExpense += t.amount;
-                }
-                double balance = monthlyIncome - monthlyExpense;
-
-                // CÁLCULO DEL KPI ESTRELLA: Costo por Cabeza
-                double costPerHead =
-                    totalAnimals > 0 ? (monthlyExpense / totalAnimals) : 0;
-
-                return CustomScrollView(
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('Flujo de $currentMonthName',
-                                    style: const TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF5e3a1c))),
-                                IconButton(
-                                  icon: const Icon(Icons.history,
-                                      color: Color(0xFFc99450)),
-                                  tooltip: 'Ver Historial Completo',
-                                  onPressed: () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (_) =>
-                                              const TransactionHistoryScreen())),
-                                )
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-
-                            // --- TARJETA PRINCIPAL DE BALANCE ---
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(20),
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(colors: [
-                                  Color(0xFF5e3a1c),
-                                  Color(0xFF8c5c32)
-                                ]),
-                                borderRadius: BorderRadius.circular(20),
-                                boxShadow: [
-                                  BoxShadow(
-                                      color: Colors.black.withOpacity(0.2),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 5))
-                                ],
-                              ),
-                              child: Column(
-                                children: [
-                                  const Text('UTILIDAD NETA MENSUAL',
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white70,
-                                          letterSpacing: 1.5)),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    currencyFormat.format(balance),
-                                    style: TextStyle(
-                                        fontSize: 38,
-                                        fontWeight: FontWeight.bold,
-                                        color: balance >= 0
-                                            ? Colors.white
-                                            : Colors.redAccent.shade100),
-                                  ),
-                                  const SizedBox(height: 20),
-                                  Container(height: 1, color: Colors.white24),
-                                  const SizedBox(height: 15),
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceAround,
-                                    children: [
-                                      _buildMiniStat('Ingresos', monthlyIncome,
-                                          Colors.greenAccent),
-                                      Container(
-                                          width: 1,
-                                          height: 40,
-                                          color: Colors.white24),
-                                      _buildMiniStat('Egresos', monthlyExpense,
-                                          Colors.redAccent),
-                                    ],
-                                  )
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 15),
-
-                            // --- KPI INNOVADOR: COSTO POR CABEZA ---
-                            Container(
-                              padding: const EdgeInsets.all(15),
-                              decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(15),
-                                  border:
-                                      Border.all(color: Colors.grey.shade300)),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                      backgroundColor: Colors.blue.shade50,
-                                      child: const Icon(FontAwesomeIcons.cow,
-                                          color: Colors.blue, size: 20)),
-                                  const SizedBox(width: 15),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        const Text('Costo de Mantenimiento',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.black87)),
-                                        Text(
-                                            'Gasto promedio por cada animal este mes ($totalAnimals cabezas)',
-                                            style: const TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.grey)),
-                                      ],
-                                    ),
-                                  ),
-                                  Text(currencyFormat.format(costPerHead),
-                                      style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.blue)),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 25),
-
-                            const Text('Transacciones Recientes',
-                                style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF5e3a1c))),
-                            const SizedBox(height: 10),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // --- LISTA DE TRANSACCIONES ---
-                    SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          if (currentMonthTransactions.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.all(20.0),
-                              child: Center(
-                                  child: Text(
-                                      'Aún no hay movimientos este mes.',
-                                      style: TextStyle(color: Colors.grey))),
-                            );
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: _getTransactionsStream(currentRanchId),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                                child: CircularProgressIndicator(
+                                    color: Color(0xFFc99450)));
                           }
-                          if (index >= currentMonthTransactions.length ||
-                              index >= 10) return null;
 
-                          Transaction t = currentMonthTransactions[index];
-                          bool isIncome = t.type == 'income';
+                          List<Transaction> allTransactions = [];
+                          if (snapshot.hasData &&
+                              snapshot.data!.docs.isNotEmpty) {
+                            allTransactions = snapshot.data!.docs.map((doc) {
+                              return Transaction.fromFirestore(
+                                  doc.data() as Map<String, dynamic>, doc.id);
+                            }).toList();
+                          }
 
-                          return Card(
-                            margin: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 5),
-                            elevation: 1,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            color: Colors.white,
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: isIncome
-                                    ? Colors.green.shade50
-                                    : Colors.red.shade50,
-                                child: Icon(
-                                    isIncome
-                                        ? Icons.arrow_downward
-                                        : Icons.arrow_upward,
-                                    color:
-                                        isIncome ? Colors.green : Colors.red),
+                          DateTime now = DateTime.now();
+                          List<Transaction> currentMonthTransactions =
+                              allTransactions.where((t) {
+                            return t.date.year == now.year &&
+                                t.date.month == now.month;
+                          }).toList();
+
+                          double monthlyIncome = 0;
+                          double monthlyExpense = 0;
+
+                          for (var t in currentMonthTransactions) {
+                            if (t.type == 'income') monthlyIncome += t.amount;
+                            if (t.type == 'expense') monthlyExpense += t.amount;
+                          }
+                          double balance = monthlyIncome - monthlyExpense;
+
+                          double costPerHead = totalAnimals > 0
+                              ? (monthlyExpense / totalAnimals)
+                              : 0;
+
+                          return CustomScrollView(
+                            slivers: [
+                              SliverToBoxAdapter(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text('Flujo de $currentMonthName',
+                                              style: const TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFF5e3a1c))),
+                                          IconButton(
+                                            icon: const Icon(Icons.history,
+                                                color: Color(0xFFc99450)),
+                                            tooltip: 'Ver Historial Completo',
+                                            onPressed: () => Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                    builder: (_) =>
+                                                        const TransactionHistoryScreen())),
+                                          )
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+
+                                      // --- TARJETA PRINCIPAL DE BALANCE ---
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(20),
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                              colors: [
+                                                Color(0xFF5e3a1c),
+                                                Color(0xFF8c5c32)
+                                              ]),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          boxShadow: [
+                                            BoxShadow(
+                                                color: Colors.black
+                                                    .withOpacity(0.2),
+                                                blurRadius: 10,
+                                                offset: const Offset(0, 5))
+                                          ],
+                                        ),
+                                        child: Column(
+                                          children: [
+                                            const Text('UTILIDAD NETA MENSUAL',
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.white70,
+                                                    letterSpacing: 1.5)),
+                                            const SizedBox(height: 10),
+
+                                            // --- EVITAMOS OVERFLOW EN BALANCE ---
+                                            FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: Text(
+                                                _formatLargeAmount(balance),
+                                                style: TextStyle(
+                                                    fontSize: 38,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: balance >= 0
+                                                        ? Colors.white
+                                                        : Colors.redAccent
+                                                            .shade100),
+                                              ),
+                                            ),
+
+                                            const SizedBox(height: 20),
+                                            Container(
+                                                height: 1,
+                                                color: Colors.white24),
+                                            const SizedBox(height: 15),
+                                            Row(
+                                              children: [
+                                                // El Widget _buildMiniStat ahora se encarga de no desbordarse
+                                                _buildMiniStat(
+                                                    'Ingresos',
+                                                    monthlyIncome,
+                                                    Colors.greenAccent),
+                                                Container(
+                                                    width: 1,
+                                                    height: 40,
+                                                    color: Colors.white24),
+                                                _buildMiniStat(
+                                                    'Egresos',
+                                                    monthlyExpense,
+                                                    Colors.redAccent),
+                                              ],
+                                            )
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 15),
+
+                                      // --- KPI INNOVADOR: COSTO POR CABEZA ---
+                                      Container(
+                                        padding: const EdgeInsets.all(15),
+                                        decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(15),
+                                            border: Border.all(
+                                                color: Colors.grey.shade300)),
+                                        child: Row(
+                                          children: [
+                                            CircleAvatar(
+                                                backgroundColor:
+                                                    Colors.blue.shade50,
+                                                child: const Icon(
+                                                    FontAwesomeIcons.cow,
+                                                    color: Colors.blue,
+                                                    size: 20)),
+                                            const SizedBox(width: 15),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  const Text(
+                                                      'Costo de Mantenimiento',
+                                                      style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color:
+                                                              Colors.black87)),
+                                                  Text(
+                                                      'Gasto promedio por cada animal este mes ($totalAnimals cabezas)',
+                                                      style: const TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors.grey)),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            // --- EVITAMOS OVERFLOW EN COSTO POR CABEZA ---
+                                            Flexible(
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                child: Text(
+                                                    _formatLargeAmount(
+                                                        costPerHead),
+                                                    style: const TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color: Colors.blue)),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 25),
+
+                                      const Text('Transacciones Recientes',
+                                          style: TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF5e3a1c))),
+                                      const SizedBox(height: 10),
+                                    ],
+                                  ),
+                                ),
                               ),
-                              title: Text(t.category,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 15)),
-                              subtitle: Text(
-                                  DateFormat('dd MMM yyyy').format(t.date),
-                                  style: const TextStyle(fontSize: 12)),
-                              trailing: Text(
-                                '${isIncome ? '+' : '-'}${currencyFormat.format(t.amount)}',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color:
-                                        isIncome ? Colors.green : Colors.red),
+
+                              // --- LISTA DE TRANSACCIONES ---
+                              SliverList(
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) {
+                                    if (currentMonthTransactions.isEmpty) {
+                                      return const Padding(
+                                        padding: EdgeInsets.all(20.0),
+                                        child: Center(
+                                            child: Text(
+                                                'Aún no hay movimientos este mes.',
+                                                style: TextStyle(
+                                                    color: Colors.grey))),
+                                      );
+                                    }
+                                    if (index >=
+                                            currentMonthTransactions.length ||
+                                        index >= 10) return null;
+
+                                    Transaction t =
+                                        currentMonthTransactions[index];
+                                    bool isIncome = t.type == 'income';
+
+                                    return Card(
+                                      margin: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 5),
+                                      elevation: 1,
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(12)),
+                                      color: Colors.white,
+                                      child: ListTile(
+                                        leading: CircleAvatar(
+                                          backgroundColor: isIncome
+                                              ? Colors.green.shade50
+                                              : Colors.red.shade50,
+                                          child: Icon(
+                                              isIncome
+                                                  ? Icons.arrow_downward
+                                                  : Icons.arrow_upward,
+                                              color: isIncome
+                                                  ? Colors.green
+                                                  : Colors.red),
+                                        ),
+                                        title: Text(t.category,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 15)),
+                                        subtitle: Text(
+                                            DateFormat('dd MMM yyyy')
+                                                .format(t.date),
+                                            style:
+                                                const TextStyle(fontSize: 12)),
+                                        trailing: Text(
+                                          '${isIncome ? '+' : '-'}${_formatLargeAmount(t.amount)}',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                              color: isIncome
+                                                  ? Colors.green
+                                                  : Colors.red),
+                                        ),
+                                        onTap: () => Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                                builder: (_) =>
+                                                    AddEditTransactionScreen(
+                                                        transaction: t))),
+                                      ),
+                                    );
+                                  },
+                                  childCount: currentMonthTransactions.isEmpty
+                                      ? 1
+                                      : (currentMonthTransactions.length > 10
+                                          ? 10
+                                          : currentMonthTransactions.length),
+                                ),
                               ),
-                              onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (_) => AddEditTransactionScreen(
-                                          transaction: t))),
-                            ),
+                              const SliverToBoxAdapter(
+                                  child: SizedBox(height: 100)),
+                            ],
                           );
                         },
-                        childCount: currentMonthTransactions.isEmpty
-                            ? 1
-                            : (currentMonthTransactions.length > 10
-                                ? 10
-                                : currentMonthTransactions.length),
-                      ),
-                    ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 100)),
-                  ],
-                );
+                      );
+                    });
               },
-            );
-          }),
+            ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Navigator.push(
             context,
@@ -343,29 +433,40 @@ class _FinanceScreenState extends State<FinanceScreen> {
   }
 
   Widget _buildMiniStat(String label, double amount, Color color) {
-    return Column(
-      children: [
-        Row(
+    // Al envolver en Expanded el componente se asegura de usar el 50% de la tarjeta exacto
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+        child: Column(
           children: [
-            Icon(
-                color == Colors.greenAccent
-                    ? Icons.trending_up
-                    : Icons.trending_down,
-                color: color,
-                size: 16),
-            const SizedBox(width: 5),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white70,
-                    fontWeight: FontWeight.bold)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                    color == Colors.greenAccent
+                        ? Icons.trending_up
+                        : Icons.trending_down,
+                    color: color,
+                    size: 16),
+                const SizedBox(width: 5),
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 5),
+            // FittedBox garantiza que si el número es inmenso (ej. miles de millones), reduzca la letra
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(_formatLargeAmount(amount),
+                  style: TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+            ),
           ],
         ),
-        const SizedBox(height: 5),
-        Text(currencyFormat.format(amount),
-            style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.bold, color: color)),
-      ],
+      ),
     );
   }
 }

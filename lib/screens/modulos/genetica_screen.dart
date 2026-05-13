@@ -16,16 +16,47 @@ class _GeneticaScreenState extends State<GeneticaScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final User? _currentUser = FirebaseAuth.instance.currentUser;
 
+  String? _currentRanchId;
+  bool _isLoadingRanch = true;
+
   // Variables para el Simulador
   Animal? _selectedMother;
   Animal? _selectedFather;
   bool _showSimulation = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentRanchId();
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    if (_currentUser == null) return;
+
+    try {
+      final userDoc =
+          await _firestore.collection('users').doc(_currentUser!.uid).get();
+      if (userDoc.exists && mounted) {
+        setState(() {
+          _currentRanchId = userDoc.data()?['currentRanchId'];
+          _isLoadingRanch = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error al cargar rancho: $e");
+      if (mounted) setState(() => _isLoadingRanch = false);
+    }
+  }
+
   Stream<QuerySnapshot> _getAllAnimals() {
-    if (_currentUser == null) return const Stream.empty();
+    if (_currentUser == null || _currentRanchId == null)
+      return const Stream.empty();
+
     return _firestore
-        .collection('users')
-        .doc(_currentUser!.uid)
+        .collection('users') // <-- AGREGADO
+        .doc(_currentUser!.uid) // <-- AGREGADO
+        .collection('ranches')
+        .doc(_currentRanchId)
         .collection('animals')
         .snapshots();
   }

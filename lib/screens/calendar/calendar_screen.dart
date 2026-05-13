@@ -9,6 +9,7 @@ import 'dart:collection';
 import 'package:manual_ganadero_flutter/models/calendar.dart'; // Importa el modelo CalendarEvent
 import 'package:manual_ganadero_flutter/screens/calendar/add_edit_event_screen.dart'; // Importa la pantalla de añadir/editar
 import 'package:intl/intl.dart'; // Para formatear fechas
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 // Funciones auxiliares para TableCalendar para comparar y hacer hash de fechas
 // Ignoran la hora para que los eventos del mismo día sean tratados igual
@@ -71,9 +72,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   List<CalendarEvent> _getEventsForWeek(DateTime weekFocusedDay) {
     List<CalendarEvent> weekEvents = [];
     DateTime startOfWeek = weekFocusedDay.subtract(
-        Duration(days: weekFocusedDay.weekday - 1)); // Lunes de la semana
-    DateTime endOfWeek =
-        startOfWeek.add(const Duration(days: 6)); // Domingo de la semana
+      Duration(days: weekFocusedDay.weekday - 1),
+    ); // Lunes de la semana
+    DateTime endOfWeek = startOfWeek.add(
+      const Duration(days: 6),
+    ); // Domingo de la semana
 
     DateTime currentDay = startOfWeek;
     while (currentDay.isBefore(endOfWeek.add(const Duration(days: 1)))) {
@@ -94,10 +97,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
   // Helper para obtener eventos de un mes específico (incluye mes actual o próximo)
   List<CalendarEvent> _getEventsForMonth(DateTime monthFocusedDay) {
     List<CalendarEvent> monthEvents = [];
-    DateTime startOfMonth =
-        DateTime.utc(monthFocusedDay.year, monthFocusedDay.month, 1);
-    DateTime endOfMonth = DateTime.utc(monthFocusedDay.year,
-        monthFocusedDay.month + 1, 0); // Último día del mes
+    DateTime startOfMonth = DateTime.utc(
+      monthFocusedDay.year,
+      monthFocusedDay.month,
+      1,
+    );
+    DateTime endOfMonth = DateTime.utc(
+      monthFocusedDay.year,
+      monthFocusedDay.month + 1,
+      0,
+    ); // Último día del mes
 
     DateTime currentDay = startOfMonth;
     while (currentDay.isBefore(endOfMonth.add(const Duration(days: 1)))) {
@@ -120,9 +129,31 @@ class _CalendarScreenState extends State<CalendarScreen> {
     if (_currentUser == null) return;
 
     try {
+      // --- INICIO MODIFICACIÓN MULTI-RANCHO ---
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_currentUser!.uid)
+          .get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      if (currentRanchId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No hay rancho seleccionado.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
       final QuerySnapshot querySnapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(_currentUser!.uid)
+          .collection('ranches') // <-- NUEVO
+          .doc(currentRanchId) // <-- NUEVO
           .collection('calendarEvents')
           .orderBy('date')
           .get();
@@ -132,9 +163,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
         _allEvents.clear(); // Limpiar eventos existentes
         for (var doc in querySnapshot.docs) {
           final event = CalendarEvent.fromFirestore(
-              doc.data() as Map<String, dynamic>, doc.id);
-          final normalizedDate =
-              DateTime.utc(event.date.year, event.date.month, event.date.day);
+            doc.data() as Map<String, dynamic>,
+            doc.id,
+          );
+          final normalizedDate = DateTime.utc(
+            event.date.year,
+            event.date.month,
+            event.date.day,
+          );
 
           _allEvents.update(
             normalizedDate,
@@ -150,9 +186,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al cargar eventos: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error al cargar eventos: $e')));
       }
     }
   }
@@ -172,9 +208,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
   void _navigateToAddEditEvent({CalendarEvent? event}) async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => AddEditEventScreen(event: event),
-      ),
+      MaterialPageRoute(builder: (context) => AddEditEventScreen(event: event)),
     );
     if (result == true) {
       _loadEvents(); // Recarga los eventos si se añade/edita/elimina
@@ -185,13 +219,27 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Future<void> _deleteEvent(String eventId) async {
     if (_currentUser == null) return;
     try {
-      await FirebaseFirestore.instance
+      // --- INICIO MODIFICACIÓN MULTI-RANCHO ---
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(_currentUser!.uid)
-          .collection('calendarEvents')
-          .doc(eventId)
-          .delete();
-      _loadEvents(); // Recargar eventos después de eliminar
+          .get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      if (currentRanchId != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(_currentUser!.uid)
+            .collection('ranches')
+            .doc(currentRanchId)
+            .collection('calendarEvents')
+            .doc(eventId)
+            .delete();
+
+        _loadEvents(); // Recargar eventos después de eliminar
+        await NotificationService().cancelNotification(eventId.hashCode);
+      } // Recargar eventos después de eliminar
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Evento eliminado con éxito')),
@@ -199,9 +247,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al eliminar evento: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error al eliminar evento: $e')));
       }
     }
   }
@@ -234,54 +282,71 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget build(BuildContext context) {
     if (_currentUser == null) {
       return const Scaffold(
-        body: Center(
-          child: Text('Error: Usuario no autenticado.'),
-        ),
+        body: Center(child: Text('Error: Usuario no autenticado.')),
       );
     }
 
-    // Obtener eventos para las secciones de la vista unificada
-    // Asegurarse de que solo se muestren eventos futuros
-    List<CalendarEvent> allUpcomingEvents = _allEvents.values
-        .expand((events) => events)
-        .where((event) => event.date.isAfter(DateTime.now()
-            .subtract(const Duration(minutes: 1)))) // Pequeño buffer
-        .toList();
-    allUpcomingEvents
-        .sort((a, b) => a.date.compareTo(b.date)); // Ordenar por fecha
-
     // Filtrar eventos de la semana actual (desde hoy hasta fin de semana)
     DateTime now = DateTime.now();
-    DateTime startOfWeek = DateTime(now.year, now.month, now.day);
-    // Asegúrate de que el fin de semana sea el domingo o el final de la semana laboral
-    // Para esta semana: va desde 'hoy' hasta 6 días más.
-    DateTime endOfWeek = startOfWeek.add(const Duration(days: 6));
+    // Quitamos las horas y minutos para que "Hoy" empiece desde la medianoche
+    DateTime startOfToday = DateTime(now.year, now.month, now.day);
+
+    // 1. Obtener todos los eventos de HOY en adelante
+    List<CalendarEvent> allUpcomingEvents =
+        _allEvents.values.expand((events) => events).where((
+      event,
+    ) {
+      // También le quitamos las horas a la fecha del evento para compararlos justamente
+      DateTime eventDateOnly = DateTime(
+        event.date.year,
+        event.date.month,
+        event.date.day,
+      );
+      return !eventDateOnly.isBefore(
+        startOfToday,
+      ); // Todo lo que sea hoy o futuro
+    }).toList();
+
+    allUpcomingEvents.sort(
+      (a, b) => a.date.compareTo(b.date),
+    ); // Ordenar por fecha
+
+    // 2. Filtrar eventos de la semana actual (desde hoy hasta 6 días más)
+    DateTime endOfWeek = startOfToday.add(const Duration(days: 6));
 
     List<CalendarEvent> currentWeekEvents = allUpcomingEvents.where((event) {
-      return event.date.isAfter(now.subtract(const Duration(minutes: 1))) &&
-          event.date
-              .isBefore(endOfWeek.add(const Duration(hours: 23, minutes: 59)));
+      DateTime eventDateOnly = DateTime(
+        event.date.year,
+        event.date.month,
+        event.date.day,
+      );
+      return !eventDateOnly.isBefore(startOfToday) &&
+          !eventDateOnly.isAfter(endOfWeek);
     }).toList();
 
-    // Filtrar eventos del próximo mes (excluyendo la semana actual)
+    // 3. Filtrar eventos del próximo mes
     DateTime startOfNextMonth = DateTime(now.year, now.month + 1, 1);
-    DateTime endOfNextMonth =
-        DateTime(now.year, now.month + 2, 0); // Último día del próximo mes
+    DateTime endOfNextMonth = DateTime(now.year, now.month + 2, 0);
 
     List<CalendarEvent> nextMonthEvents = allUpcomingEvents.where((event) {
-      // Eventos que están en el rango del próximo mes y no están ya en la semana actual
-      return event.date
-              .isAfter(startOfNextMonth.subtract(const Duration(minutes: 1))) &&
-          event.date.isBefore(
-              endOfNextMonth.add(const Duration(hours: 23, minutes: 59))) &&
-          !currentWeekEvents.contains(
-              event); // Evitar duplicados si un evento de la semana actual cae en el próximo mes
+      DateTime eventDateOnly = DateTime(
+        event.date.year,
+        event.date.month,
+        event.date.day,
+      );
+      return !eventDateOnly.isBefore(startOfNextMonth) &&
+          !eventDateOnly.isAfter(endOfNextMonth) &&
+          !currentWeekEvents.contains(event);
     }).toList();
 
-    // Filtrar eventos a futuro (más allá del próximo mes, como los partos)
+    // 4. Filtrar eventos a futuro
     List<CalendarEvent> futureEvents = allUpcomingEvents.where((event) {
-      return event.date
-          .isAfter(endOfNextMonth.add(const Duration(hours: 23, minutes: 59)));
+      DateTime eventDateOnly = DateTime(
+        event.date.year,
+        event.date.month,
+        event.date.day,
+      );
+      return eventDateOnly.isAfter(endOfNextMonth);
     }).toList();
 
     return Scaffold(
@@ -332,8 +397,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   // Estilo para los textos de los días
                   defaultTextStyle: const TextStyle(color: Color(0xFF5e3a1c)),
                   holidayTextStyle: const TextStyle(color: Color(0xFF5e3a1c)),
-                  weekNumberTextStyle:
-                      const TextStyle(color: Color(0xFF5e3a1c)),
+                  weekNumberTextStyle: const TextStyle(
+                    color: Color(0xFF5e3a1c),
+                  ),
                 ),
                 headerStyle: HeaderStyle(
                   formatButtonVisible: false,
@@ -343,10 +409,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     fontSize: 18.0,
                     fontWeight: FontWeight.bold,
                   ),
-                  leftChevronIcon:
-                      const Icon(Icons.chevron_left, color: Color(0xFF5e3a1c)),
-                  rightChevronIcon:
-                      const Icon(Icons.chevron_right, color: Color(0xFF5e3a1c)),
+                  leftChevronIcon: const Icon(
+                    Icons.chevron_left,
+                    color: Color(0xFF5e3a1c),
+                  ),
+                  rightChevronIcon: const Icon(
+                    Icons.chevron_right,
+                    color: Color(0xFF5e3a1c),
+                  ),
                 ),
                 onFormatChanged: (format) {
                   setState(() {
@@ -388,8 +458,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
               },
             ),
             const SizedBox(
-                height: 20.0), // Espacio después de la sección del día
-
+              height: 20.0,
+            ), // Espacio después de la sección del día
             // Sección: Actividades de esta Semana
             _buildSectionTitle('Actividades de esta Semana'),
             currentWeekEvents.isEmpty
@@ -412,8 +482,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     },
                   ),
             const SizedBox(
-                height: 20.0), // Espacio después de la sección de la semana
-
+              height: 20.0,
+            ), // Espacio después de la sección de la semana
             // Sección: Actividades del Próximo Mes
             _buildSectionTitle('Actividades del Próximo Mes'),
             nextMonthEvents.isEmpty
@@ -477,7 +547,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          16.0, 16.0, 16.0, 8.0), // Más padding superior
+        16.0,
+        16.0,
+        16.0,
+        8.0,
+      ), // Más padding superior
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(
@@ -495,18 +569,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget _buildEventCard(CalendarEvent event) {
     return Card(
       margin: const EdgeInsets.symmetric(
-          horizontal: 16.0, vertical: 6.0), // Más margen y vertical
+        horizontal: 16.0,
+        vertical: 6.0,
+      ), // Más margen y vertical
       elevation: 3, // Mayor elevación para un efecto más pronunciado
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12)), // Bordes más redondeados
+        borderRadius: BorderRadius.circular(12),
+      ), // Bordes más redondeados
       color: Colors.white, // Fondo de tarjeta blanco
       child: InkWell(
         // Para el efecto de "ripple" al tocar
         onTap: () => _navigateToAddEditEvent(event: event),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding:
-              const EdgeInsets.all(12.0), // Más padding dentro de la tarjeta
+          padding: const EdgeInsets.all(
+            12.0,
+          ), // Más padding dentro de la tarjeta
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -522,9 +600,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     Text(
                       event.title,
                       style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16, // Título un poco más grande
-                          color: Color(0xFF5e3a1c)),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16, // Título un poco más grande
+                        color: Color(0xFF5e3a1c),
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -536,7 +615,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       Text(
                         event.description,
                         style: const TextStyle(
-                            fontSize: 14, color: Colors.black87),
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
                         maxLines: 2, // Limitar descripción a 2 líneas
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -548,7 +629,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
               IconButton(
                 icon: const Icon(Icons.delete, color: Colors.red),
                 onPressed: () => _confirmDeleteEvent(
-                    event.id), // Confirmación antes de eliminar
+                  event.id,
+                ), // Confirmación antes de eliminar
               ),
             ],
           ),
@@ -563,22 +645,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Confirmar Eliminación',
-              style: TextStyle(color: Color(0xFF5e3a1c))),
-          content:
-              const Text('¿Estás seguro de que quieres eliminar este evento?'),
+          title: const Text(
+            'Confirmar Eliminación',
+            style: TextStyle(color: Color(0xFF5e3a1c)),
+          ),
+          content: const Text(
+            '¿Estás seguro de que quieres eliminar este evento?',
+          ),
           backgroundColor: const Color(0xFFfbf6ec),
           surfaceTintColor: const Color(0xFFfbf6ec),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar',
-                  style: TextStyle(color: Color(0xFF6b4226))),
+              child: const Text(
+                'Cancelar',
+                style: TextStyle(color: Color(0xFF6b4226)),
+              ),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child:
-                  const Text('Eliminar', style: TextStyle(color: Colors.red)),
+              child: const Text(
+                'Eliminar',
+                style: TextStyle(color: Colors.red),
+              ),
             ),
           ],
         );

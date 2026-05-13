@@ -43,9 +43,27 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
 
     try {
-      final docSnapshot = await FirebaseFirestore.instance
+      // Obtener rancho actual
+      final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
+          .get();
+
+      final currentRanchId = userDoc.data()?['currentRanchId'];
+
+      if (currentRanchId == null) {
+        setState(() {
+          _errorMessage = 'No hay un rancho seleccionado.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final docSnapshot = await FirebaseFirestore.instance
+          .collection('users') // <-- NUEVO
+          .doc(user.uid) // <-- NUEVO
+          .collection('ranches')
+          .doc(currentRanchId)
           .collection('products')
           .doc(widget.productId)
           .get();
@@ -101,9 +119,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     if (confirm == true) {
       try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+
+        final currentRanchId = userDoc.data()?['currentRanchId'];
+
+        if (currentRanchId == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No hay un rancho seleccionado.')),
+          );
+          return;
+        }
+
         await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
+            .collection('ranches') // 👈 NUEVO
+            .doc(currentRanchId) // 👈 NUEVO
             .collection('products')
             .doc(widget.productId)
             .delete();
