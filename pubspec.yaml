@@ -17,12 +17,14 @@ dependencies:
   firebase_auth: ^5.5.3
   firebase_storage: ^12.1.1 # Añadida: Para subir y descargar archivos de Firebase Storage
   google_sign_in: ^6.2.1
+  speech_to_text: 7.0.0
+  flutter_tts: ^4.0.2 # Text-to-Speech para que el sistema hable
 
   # Dependencias para la funcionalidad de IA
   image_picker: ^1.1.0 # Añadida: Para seleccionar imágenes de la galería o cámara
   tflite_flutter: ^0.11.0 # Añadida: Para ejecutar modelos TensorFlow Lite
   image: ^4.2.0 # Añadida: Para manipular (redimensionar) imágenes antes del análisis
-  path_provider: ^2.1.3 # Añadida: Útil para manejar rutas de archivos temporales
+  path_provider: ^2.1.5 # Añadida: Útil para manejar rutas de archivos temporales
 
   # Otras dependencias que ya tenías
   fl_chart: ^1.0.0
@@ -33,11 +35,26 @@ dependencies:
   collection: ^1.18.0
   carousel_slider: ^5.0.0
   uuid: ^4.0.0
+  file_picker: ^10.3.10
+  excel: ^4.0.6
+  url_launcher: ^6.3.2
+  pdf: ^3.12.0
+  printing: ^5.14.3
+  geolocator: ^13.0.1
+  share_plus: ^12.0.1
+  http: ^1.2.0
+  flutter_local_notifications: ^21.0.0
+  timezone: ^0.11.0
+
+  in_app_purchase: ^3.2.0
+  in_app_purchase_android: ^0.3.5
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.1
 
 flutter:
   uses-material-design: true
@@ -46,3 +63,21 @@ flutter:
   assets:
     - assets/
     - assets/models/
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/LogoModificado.jpg"
+  min_sdk_android: 21 # Recomendado para apps modernas
+
+# ==========================================
+# CONFIGURACIÓN DE LA PANTALLA DE CARGA (SPLASH)
+# ==========================================
+flutter_native_splash:
+  color: "#fbf6ec" # Color de fondo (Blanco). Cámbialo si tu logo es oscuro.
+  image: "assets/LogoModificado.jpg"
+  android: true
+  ios: true
+  android_12:
+    image: "assets/LogoModificado.jpg"
+    color: "#fbf6ec"

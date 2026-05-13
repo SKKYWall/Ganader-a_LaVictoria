@@ -8,6 +8,7 @@ import 'package:manual_ganadero_flutter/models/animal.dart'; // ¡Importa tu mod
 import 'package:intl/intl.dart'; // Para formatear fechas
 import 'package:manual_ganadero_flutter/screens/bovino/edit_animal_screen.dart'; // Asegúrate de importar tu EditAnimalScreen
 import 'package:firebase_storage/firebase_storage.dart'; // Importar para Firebase Storage para eliminar imagen
+import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 
 class AnimalDetailScreen extends StatefulWidget {
   final String animalId; // Recibimos el ID del animal
@@ -30,6 +31,7 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
   void initState() {
     super.initState();
     _loadAnimalData();
+    _cleanExpiredVaccines();
   }
 
   @override
@@ -51,13 +53,31 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
     }
 
     try {
+      // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+      if (currentRanchId == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay rancho seleccionado.')),
+        );
+        setState(() => _isLoading = false);
+        return;
+      }
+
       _firestore
           .collection('users')
           .doc(user.uid)
+          .collection('ranches') // <-- NUEVO
+          .doc(currentRanchId) // <-- NUEVO
           .collection('animals')
           .doc(widget.animalId)
-          .snapshots() // Usar snapshots para actualizaciones en tiempo real
+          .snapshots()
           .listen((docSnapshot) {
+        // --- FIN DE MODIFICACIÓN ---
         if (!mounted) return;
         if (docSnapshot.exists && docSnapshot.data() != null) {
           setState(() {
@@ -73,7 +93,7 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Animal no encontrado.')),
           );
-          Navigator.of(context).pop(); // Volver si el animal no existe
+          Navigator.of(context).pop();
         }
       });
     } catch (e) {
@@ -195,13 +215,22 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
           }
         }
 
-        // Eliminar el documento del animal
-        await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('animals')
-            .doc(widget.animalId)
-            .delete();
+        DocumentSnapshot userDoc =
+            await _firestore.collection('users').doc(user.uid).get();
+        String? currentRanchId =
+            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+        if (currentRanchId != null) {
+          // Eliminar el documento del animal
+          await _firestore
+              .collection('users')
+              .doc(user.uid)
+              .collection('ranches') // <-- NUEVO
+              .doc(currentRanchId) // <-- NUEVO
+              .collection('animals')
+              .doc(widget.animalId)
+              .delete();
+        }
 
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -434,6 +463,142 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
     );
   }
 
+// --- NUEVA FUNCIÓN PARA BORRAR TRATAMIENTOS MÉDICOS ---
+  // Cambiamos Map<String, dynamic> por "dynamic" o tu clase "VaccineRecord"
+  Future<void> _deleteVaccination(dynamic medRecord) async {
+    bool confirm = await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Eliminar Tratamiento'),
+            content: const Text(
+                '¿Estás seguro de que deseas eliminar este tratamiento médico del historial de este animal?'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Eliminar',
+                    style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (confirm) {
+      try {
+        // Como tu modelo lo convirtió a Objeto, lo volvemos a hacer Mapa
+        // para que Firebase entienda qué borrar exactamente.
+        Map<String, dynamic> recordToRemove;
+
+        // Verificamos si tu modelo tiene una función toMap(), si no, lo construimos manual:
+        try {
+          recordToRemove = medRecord.toMap();
+        } catch (e) {
+          recordToRemove = {
+            'name': medRecord.name,
+            // Reconstruimos el Timestamp si la fecha es un DateTime
+            'date': medRecord.date is DateTime
+                ? Timestamp.fromDate(medRecord.date)
+                : medRecord.date,
+          };
+        }
+
+        DocumentSnapshot userDoc = await _firestore
+            .collection('users')
+            .doc(_auth.currentUser!.uid)
+            .get();
+        String? currentRanchId =
+            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+        if (currentRanchId != null) {
+          await _firestore
+              .collection('users')
+              .doc(_auth.currentUser!.uid)
+              .collection('ranches') // <-- NUEVO
+              .doc(currentRanchId) // <-- NUEVO
+              .collection('animals')
+              .doc(widget.animalId)
+              .update({
+            'vaccinations': FieldValue.arrayRemove([recordToRemove])
+          });
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Registro médico eliminado'),
+              backgroundColor: Colors.red));
+          _loadAnimalData(); // Recarga la pantalla
+        }
+      } catch (e) {
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Error al eliminar: $e'),
+              backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  // --- NUEVA FUNCIÓN: LIMPIEZA AUTOMÁTICA DE VACUNAS VENCIDAS ---
+  Future<void> _cleanExpiredVaccines() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+
+      DocumentSnapshot userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      String? currentRanchId =
+          (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+      if (currentRanchId == null) return;
+
+      DocumentSnapshot doc = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('ranches') // <-- NUEVO
+          .doc(currentRanchId) // <-- NUEVO
+          .collection('animals')
+          .doc(widget.animalId)
+          .get();
+
+      if (!doc.exists) return;
+
+      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      List<dynamic> rawVaccinations = data['vaccinations'] ?? [];
+      List<dynamic> vaccinesToRemove = [];
+
+      // 2. Buscamos cuáles vacunas ya pasaron su fecha de caducidad
+      for (var vac in rawVaccinations) {
+        if (vac is Map<String, dynamic> && vac.containsKey('expiresAt')) {
+          DateTime expiresAt = (vac['expiresAt'] as Timestamp).toDate();
+
+          // Si la fecha de caducidad ya es "antes" de la fecha actual, está vencida
+          if (expiresAt.isBefore(DateTime.now())) {
+            vaccinesToRemove.add(vac);
+          }
+        }
+      }
+
+      // 3. Si encontramos vacunas vencidas, las borramos automáticamente
+      if (vaccinesToRemove.isNotEmpty) {
+        await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('ranches') // <-- NUEVO
+            .doc(currentRanchId) // <-- NUEVO
+            .collection('animals')
+            .doc(widget.animalId)
+            .update({'vaccinations': FieldValue.arrayRemove(vaccinesToRemove)});
+
+        // Volvemos a cargar los datos para que la pantalla se actualice y desaparezcan visualmente
+        _loadAnimalData();
+      }
+    } catch (e) {
+      debugPrint("Error limpiando vacunas vencidas: $e");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -575,6 +740,7 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
                     _buildDetailRow('Número de Pierna', _animal!.legNumber),
                     _buildDetailRow(
                         'Número de Registro', _animal!.registrationNumber),
+                    _buildDetailRow('Propósito', _animal!.purpose),
                   ],
                 ),
               ),
@@ -597,8 +763,8 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
                         _formatWeight(_animal!.birthWeight)),
                     _buildDetailRow('Peso al Destete',
                         _formatWeight(_animal!.weaningWeight)),
-                    _buildDetailRow('Padre', _animal!.father),
-                    _buildDetailRow('Madre', _animal!.mother),
+                    _buildDetailRow('Arete del Padre', _animal!.father),
+                    _buildDetailRow('Arete de la Madre', _animal!.mother),
                   ],
                 ),
               ),
@@ -750,6 +916,67 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
 
             // Gráfica de peso (si hay estadísticas)
             if (_animal!.stats.isNotEmpty) _buildWeightChart(_animal!.stats),
+            const SizedBox(height: 20),
+
+            // --- NUEVA SECCIÓN: SANIDAD E HISTORIAL MÉDICO ---
+            _buildSectionTitle('Sanidad e Historial Médico'),
+            Card(
+              elevation: 3,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15)),
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: _animal!.vaccinations != null &&
+                        _animal!.vaccinations!.isNotEmpty
+                    ? Column(
+                        children: _animal!.vaccinations!.map((med) {
+                          String name = med.name ?? 'Tratamiento';
+
+                          // CORRECCIÓN: Como tu modelo ya lo convirtió a DateTime, lo usamos directo
+                          DateTime date = med.date;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8.0),
+                            decoration: BoxDecoration(
+                                color: Colors.teal.shade50,
+                                borderRadius: BorderRadius.circular(10),
+                                border:
+                                    Border.all(color: Colors.teal.shade100)),
+                            child: ListTile(
+                              leading: const CircleAvatar(
+                                backgroundColor: Colors.white,
+                                child: Icon(Icons.vaccines, color: Colors.teal),
+                              ),
+                              title: Text(name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14)),
+                              subtitle: Text(
+                                  'Aplicado el: ${DateFormat('dd/MM/yyyy').format(date)}',
+                                  style: const TextStyle(fontSize: 12)),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.delete,
+                                    color: Colors.redAccent),
+                                onPressed: () => _deleteVaccination(med),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      )
+                    : const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 10.0),
+                        child: Center(
+                          child: Text(
+                            'El animal no tiene historial médico registrado.',
+                            style: TextStyle(
+                                color: Colors.grey,
+                                fontStyle: FontStyle.italic),
+                          ),
+                        ),
+                      ),
+              ),
+            ),
             const SizedBox(height: 20),
           ],
         ),

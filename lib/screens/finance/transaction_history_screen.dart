@@ -5,8 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart'
     hide Transaction; // Oculta la clase Transaction de cloud_firestore
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:manual_ganadero_flutter/models/transaction.dart'; // Importa tu modelo Transaction
-import 'package:manual_ganadero_flutter/screens/finance/add_edit_transaction_screen.dart'; // Para editar
+import 'package:manual_ganadero_flutter/models/transaction.dart';
+import 'package:manual_ganadero_flutter/screens/finance/add_edit_transaction_screen.dart';
 
 class TransactionHistoryScreen extends StatefulWidget {
   const TransactionHistoryScreen({super.key});
@@ -18,13 +18,11 @@ class TransactionHistoryScreen extends StatefulWidget {
 
 class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   final User? _currentUser = FirebaseAuth.instance.currentUser;
-  String? _filterType; // 'income', 'expense', o null para todos
-  String? _filterCategory; // Categoría seleccionada
-  int? _filterMonth; // Mes seleccionado (1-12)
-  int? _filterYear; // Año seleccionado
+  String? _filterType;
+  String? _filterCategory;
+  int? _filterMonth;
+  int? _filterYear;
 
-  // Definición de categorías (duplicadas aquí para simplificar el ejemplo,
-  // idealmente serían un singleton o un proveedor de datos compartido)
   final Map<String, List<String>> _incomeCategories = {
     'Venta de Animales': ['Bovinos', 'Ovinos / Caprinos', 'Cerdos'],
     'Otros Ingresos': [
@@ -48,7 +46,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     'Otros Egresos': ['Seguros', 'Impuestos', 'Transporte', 'Gastos Bancarios'],
   };
 
-  // Opciones de categorías para el filtro (combinar ingresos y egresos para un solo dropdown)
   List<String> _getAllCategories() {
     final Set<String> categories = {};
     for (var cat in _incomeCategories.keys) {
@@ -68,12 +65,16 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     _filterYear = now.year;
   }
 
+  // SOLUCIÓN 3: Formato compacto de moneda (Ej: $1.5M, $15K)
   String _formatCurrency(double amount) {
-    final formatter = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
+    // Usamos en_US para asegurar el uso de 'K' y 'M'
+    final formatter =
+        NumberFormat.compactCurrency(locale: 'en_US', symbol: '\$');
     return formatter.format(amount);
   }
 
-  Stream<QuerySnapshot> _getTransactionsStream() {
+  // Modificado: Solo consultamos a Firebase por fecha para evitar problemas de índices.
+  Stream<QuerySnapshot> _getTransactionsStream(String ranchId) {
     if (_currentUser == null) {
       return const Stream.empty();
     }
@@ -81,21 +82,15 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
         .collection('users')
         .doc(_currentUser!.uid)
+        .collection('ranches')
+        .doc(ranchId)
         .collection('transactions')
-        .orderBy('date',
-            descending: true); // Ordenar por fecha, los más recientes primero
+        .orderBy('date', descending: true);
 
-    if (_filterType != null) {
-      query = query.where('type', isEqualTo: _filterType);
-    }
-    if (_filterCategory != null) {
-      query = query.where('category', isEqualTo: _filterCategory);
-    }
-    if (_filterYear != null) {
-      // Filtrar por año y mes específicos
+    if (_filterYear != null && _filterMonth != null) {
       final startOfMonth = DateTime(_filterYear!, _filterMonth!, 1);
-      final endOfMonth = DateTime(_filterYear!, _filterMonth! + 1, 0, 23, 59,
-          59); // Último milisegundo del mes
+      final endOfMonth =
+          DateTime(_filterYear!, _filterMonth! + 1, 0, 23, 59, 59);
 
       query = query
           .where('date', isGreaterThanOrEqualTo: startOfMonth)
@@ -116,7 +111,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       );
     }
 
-    // Generar la lista de meses para el Dropdown
     final List<String> monthNames = [
       'Enero',
       'Febrero',
@@ -131,8 +125,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       'Noviembre',
       'Diciembre'
     ];
-    final List<int> years = List<int>.generate(
-        10, (i) => DateTime.now().year - 5 + i); // 5 años atrás y 5 adelante
+    final List<int> years =
+        List<int>.generate(10, (i) => DateTime.now().year - 5 + i);
 
     return Scaffold(
       backgroundColor: const Color(0xFFfbf6ec),
@@ -153,20 +147,26 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
-                // Filtros de Tipo y Categoría
                 Row(
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
+                        isExpanded: true, // <-- SOLUCIÓN 2: Evita el overflow
                         value: _filterType,
                         decoration: _inputDecoration('Tipo'),
                         items: const [
                           DropdownMenuItem(
-                              value: null, child: Text('Todos los tipos')),
+                              value: null,
+                              child: Text('Todos',
+                                  overflow: TextOverflow.ellipsis)),
                           DropdownMenuItem(
-                              value: 'income', child: Text('Ingresos')),
+                              value: 'income',
+                              child: Text('Ingresos',
+                                  overflow: TextOverflow.ellipsis)),
                           DropdownMenuItem(
-                              value: 'expense', child: Text('Egresos')),
+                              value: 'expense',
+                              child: Text('Egresos',
+                                  overflow: TextOverflow.ellipsis)),
                         ],
                         onChanged: (value) {
                           setState(() {
@@ -178,15 +178,19 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: DropdownButtonFormField<String>(
+                        isExpanded: true, // <-- SOLUCIÓN 2: Evita el overflow
                         value: _filterCategory,
                         decoration: _inputDecoration('Categoría'),
                         items: [
                           const DropdownMenuItem(
-                              value: null, child: Text('Todas las categorías')),
+                              value: null,
+                              child: Text('Todas',
+                                  overflow: TextOverflow.ellipsis)),
                           ..._getAllCategories()
                               .map((category) => DropdownMenuItem(
                                     value: category,
-                                    child: Text(category),
+                                    child: Text(category,
+                                        overflow: TextOverflow.ellipsis),
                                   )),
                         ],
                         onChanged: (value) {
@@ -199,18 +203,19 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                // Filtros de Mes y Año
                 Row(
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<int>(
+                        isExpanded: true,
                         value: _filterMonth,
                         decoration: _inputDecoration('Mes'),
                         items: List.generate(12, (index) => index + 1)
                             .map((month) {
                           return DropdownMenuItem(
                             value: month,
-                            child: Text(monthNames[month - 1]),
+                            child: Text(monthNames[month - 1],
+                                overflow: TextOverflow.ellipsis),
                           );
                         }).toList(),
                         onChanged: (value) {
@@ -223,12 +228,14 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: DropdownButtonFormField<int>(
+                        isExpanded: true,
                         value: _filterYear,
                         decoration: _inputDecoration('Año'),
                         items: years.map((year) {
                           return DropdownMenuItem(
                             value: year,
-                            child: Text(year.toString()),
+                            child: Text(year.toString(),
+                                overflow: TextOverflow.ellipsis),
                           );
                         }).toList(),
                         onChanged: (value) {
@@ -244,103 +251,150 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
             ),
           ),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _getTransactionsStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(Color(0xFF6b4226)),
-                    ),
-                  );
-                }
+            child: StreamBuilder<DocumentSnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(_currentUser!.uid)
+                    .snapshots(),
+                builder: (context, userSnapshot) {
+                  if (userSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(
+                        child: CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                                Color(0xFF6b4226))));
+                  }
 
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
+                  String? currentRanchId = (userSnapshot.data?.data()
+                      as Map<String, dynamic>?)?['currentRanchId'];
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(
+                  if (currentRanchId == null) {
+                    return const Center(
                       child: Text(
-                          'No hay transacciones para el período seleccionado.'));
-                }
+                          'Por favor, selecciona un rancho desde el Inicio.',
+                          style: TextStyle(color: Colors.grey)),
+                    );
+                  }
 
-                final transactions = snapshot.data!.docs.map((doc) {
-                  return Transaction.fromFirestore(
-                      doc.data() as Map<String, dynamic>, doc.id);
-                }).toList();
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: _getTransactionsStream(currentRanchId),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                                Color(0xFF6b4226)),
+                          ),
+                        );
+                      }
 
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0, vertical: 8.0),
-                  itemCount: transactions.length,
-                  itemBuilder: (context, index) {
-                    final transaction = transactions[index];
-                    return Card(
-                      elevation: 1,
-                      margin: const EdgeInsets.symmetric(vertical: 8.0),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      color: Colors.white,
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: transaction.type == 'income'
-                              ? Colors.green.withOpacity(0.1)
-                              : Colors.red.withOpacity(0.1),
-                          child: Icon(
-                            transaction.type == 'income'
-                                ? Icons.arrow_downward
-                                : Icons.arrow_upward,
-                            color: transaction.type == 'income'
-                                ? Colors.green
-                                : Colors.red,
-                          ),
-                        ),
-                        title: Text(
-                          transaction.category +
-                              (transaction.subCategory != null
-                                  ? ' - ${transaction.subCategory}'
-                                  : ''),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF5e3a1c),
-                          ),
-                        ),
-                        subtitle: Text(
-                          '${DateFormat('dd MMM').format(transaction.date)} - ${transaction.notes ?? 'N/A'}',
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                        trailing: Text(
-                          _formatCurrency(transaction.amount),
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: transaction.type == 'income'
-                                ? Colors.green
-                                : Colors.red,
-                          ),
-                        ),
-                        onTap: () async {
-                          final result = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => AddEditTransactionScreen(
-                                  transaction: transaction),
+                      if (snapshot.hasError) {
+                        return Center(child: Text('Error: ${snapshot.error}'));
+                      }
+
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return const Center(
+                            child: Text(
+                                'No hay transacciones para el período seleccionado.'));
+                      }
+
+                      // Convertir a lista de transacciones
+                      var transactions = snapshot.data!.docs.map((doc) {
+                        return Transaction.fromFirestore(
+                            doc.data() as Map<String, dynamic>, doc.id);
+                      }).toList();
+
+                      // SOLUCIÓN 1: Filtrar localmente en lugar de Firebase
+                      // Esto arregla que los filtros "no sirvan" y evita errores de índices
+                      if (_filterType != null) {
+                        transactions = transactions
+                            .where((t) => t.type == _filterType)
+                            .toList();
+                      }
+                      if (_filterCategory != null) {
+                        transactions = transactions
+                            .where((t) => t.category == _filterCategory)
+                            .toList();
+                      }
+
+                      if (transactions.isEmpty) {
+                        return const Center(
+                            child: Text(
+                                'No se encontraron resultados con estos filtros.'));
+                      }
+
+                      return ListView.builder(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16.0, vertical: 8.0),
+                        itemCount: transactions.length,
+                        itemBuilder: (context, index) {
+                          final transaction = transactions[index];
+                          return Card(
+                            elevation: 1,
+                            margin: const EdgeInsets.symmetric(vertical: 8.0),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                            color: Colors.white,
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: transaction.type == 'income'
+                                    ? Colors.green.withOpacity(0.1)
+                                    : Colors.red.withOpacity(0.1),
+                                child: Icon(
+                                  transaction.type == 'income'
+                                      ? Icons.arrow_downward
+                                      : Icons.arrow_upward,
+                                  color: transaction.type == 'income'
+                                      ? Colors.green
+                                      : Colors.red,
+                                ),
+                              ),
+                              title: Text(
+                                transaction.category +
+                                    (transaction.subCategory != null
+                                        ? ' - ${transaction.subCategory}'
+                                        : ''),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF5e3a1c)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                '${DateFormat('dd MMM').format(transaction.date)} - ${transaction.notes ?? 'N/A'}',
+                                style: TextStyle(color: Colors.grey[600]),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: Text(
+                                _formatCurrency(transaction.amount),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: transaction.type == 'income'
+                                      ? Colors.green
+                                      : Colors.red,
+                                ),
+                              ),
+                              onTap: () async {
+                                final result = await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        AddEditTransactionScreen(
+                                            transaction: transaction),
+                                  ),
+                                );
+                                if (result == true) {
+                                  setState(() {});
+                                }
+                              },
                             ),
                           );
-                          if (result == true) {
-                            setState(() {
-                              // Esto fuerza una recarga del StreamBuilder para mostrar los cambios
-                            });
-                          }
                         },
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
+                      );
+                    },
+                  );
+                }),
           ),
         ],
       ),
@@ -350,9 +404,10 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   InputDecoration _inputDecoration(String labelText) {
     return InputDecoration(
       labelText: labelText,
-      labelStyle: const TextStyle(color: Color(0xFF5e3a1c)),
+      labelStyle: const TextStyle(color: Color(0xFF5e3a1c), fontSize: 13),
       filled: true,
       fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10.0),
         borderSide: BorderSide.none,

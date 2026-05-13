@@ -10,12 +10,13 @@ plugins {
 
 android {
     namespace = "com.example.manual_ganadero_flutter"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -27,10 +28,11 @@ defaultConfig {
     applicationId = "com.example.manual_ganadero_flutter"
     // You can update the following values to match your application needs.
     // For more information, see: https://flutter.dev/to/review-gradle-config.
-    minSdkVersion(23) // Changed this line
-    targetSdk = flutter.targetSdkVersion
+    minSdkVersion(24) // Changed this line
+    targetSdk = 36
     versionCode = flutter.versionCode
     versionName = flutter.versionName
+    multiDexEnabled = true
 }
 
     buildTypes {
@@ -44,4 +46,8 @@ defaultConfig {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

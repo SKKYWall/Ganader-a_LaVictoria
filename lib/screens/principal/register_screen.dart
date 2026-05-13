@@ -1,6 +1,11 @@
+// lib/screens/principal/register_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manual_ganadero_flutter/screens/profile/ranch_setup_screen.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:manual_ganadero_flutter/services/auth_service.dart'; // <-- NUEVA IMPORTACIÓN
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -10,13 +15,12 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
-  bool _obscureText = true; // Para alternar la visibilidad de la contraseña
+  bool _obscureText = true;
 
   @override
   void dispose() {
@@ -25,70 +29,167 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
+  // --- REFACTORIZADO: Seguridad Fuerte y uso de AuthService ---
   void _register() async {
     String email = _emailController.text.trim();
     String password = _passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      _showAlert('Error',
+      _showAlert('Atención',
           'Por favor, completa el correo electrónico y la contraseña.');
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    // --- NUEVAS REGLAS DE SEGURIDAD PARA LA CONTRASEÑA ---
+    if (password.length < 8) {
+      _showAlert('Contraseña débil',
+          'La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (!password.contains(RegExp(r'[A-Z]'))) {
+      _showAlert('Contraseña débil',
+          'La contraseña debe contener al menos una letra mayúscula.');
+      return;
+    }
+    if (!password.contains(RegExp(r'[0-9]'))) {
+      _showAlert('Contraseña débil',
+          'La contraseña debe contener al menos un número.');
+      return;
+    }
+    // -----------------------------------------------------
 
+    setState(() => _isLoading = true);
+
+    // 1. Registrar usuario en Firebase Auth a través del Servicio
+    final result = await AuthService().registerUser(email, password);
+
+    if (result['error'] != null) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _showAlert('Error al registrar', result['error']);
+      }
+      return;
+    }
+
+    // 2. Si tuvo éxito, creamos su documento base en Firestore
     try {
-      UserCredential userCredential =
-          await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      User user = result['user'];
+      await _db.collection('users').doc(user.uid).set({
+        'uid': user.uid,
+        'email': email,
+        'displayName': 'Usuario', // Nombre por defecto
+        'photoURL': null,
+        'createdAt': FieldValue.serverTimestamp(),
+        'setupCompleted': false, // Aún no configura su rancho
+      });
 
-      User? user = userCredential.user;
-
-      if (user != null) {
-        await _db.collection('users').doc(user.uid).set({
-          'uid': user.uid,
-          'email': user.email ?? '',
-          'displayName': 'Usuario', // Puedes pedir un nombre al usuario
-          'photoURL': null,
-        });
-
+      if (mounted) {
         _showAlert('Registro exitoso', 'Tu cuenta ha sido creada. ¡Bienvenido!',
             () {
-          Navigator.pushReplacementNamed(context, '/dashboard');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const RanchSetupScreen()),
+          );
         });
       }
-    } on FirebaseAuthException catch (e) {
-      String errorMessage = 'Error al registrar.';
-      if (e.code == 'weak-password') {
-        errorMessage = 'La contraseña es demasiado débil.';
-      } else if (e.code == 'email-already-in-use') {
-        errorMessage = 'La cuenta ya existe para ese correo electrónico.';
-      } else if (e.code == 'invalid-email') {
-        errorMessage = 'El correo electrónico no es válido.';
-      }
-      _showAlert('Error al registrar', errorMessage);
+    } catch (e) {
+      if (mounted)
+        _showAlert('Error', 'No se pudo crear el perfil del usuario: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // --- Registro con Google ---
+  Future<void> _registerWithGoogle() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+      await googleSignIn.signOut(); // Forzamos la selección de cuenta
+
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      if (googleUser == null) {
+        setState(() => _isLoading = false);
+        return; // Canceló
+      }
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+      User? user = userCredential.user;
+
+      if (user != null) {
+        DocumentSnapshot userDoc =
+            await _db.collection('users').doc(user.uid).get();
+
+        if (!userDoc.exists) {
+          // Es su primera vez usando Google en la app, creamos su perfil
+          await _db.collection('users').doc(user.uid).set({
+            'uid': user.uid,
+            'email': user.email,
+            'displayName': user.displayName ?? 'Usuario',
+            'photoURL': user.photoURL,
+            'createdAt': FieldValue.serverTimestamp(),
+            'setupCompleted': false,
+          });
+
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const RanchSetupScreen()),
+            );
+          }
+        } else {
+          // Si ya existía, actuamos como Login y validamos si tiene ranchos
+          QuerySnapshot ranchesSnapshot = await _db
+              .collection('users')
+              .doc(user.uid)
+              .collection('ranches')
+              .limit(1)
+              .get();
+
+          if (mounted) {
+            if (ranchesSnapshot.docs.isEmpty) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const RanchSetupScreen()),
+              );
+            } else {
+              Navigator.pushReplacementNamed(context, '/dashboard');
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) _showAlert('Error de registro con Google', e.toString());
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- Función de Alertas ---
   void _showAlert(String title, String content, [VoidCallback? onClose]) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(title),
-        content: Text(content),
+        backgroundColor: const Color(0xfffbf6ec),
+        title: Text(title,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Color(0xff5e3a1c))),
+        content: Text(content, style: const TextStyle(color: Colors.black87)),
         actions: [
           TextButton(
-            child: const Text('OK'),
+            child: const Text('Entendido',
+                style: TextStyle(
+                    color: Color(0xFFc99450), fontWeight: FontWeight.bold)),
             onPressed: () {
               Navigator.pop(context);
               if (onClose != null) {
@@ -106,22 +207,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       backgroundColor: const Color(0xfffbf6ec),
       body: SafeArea(
-        // Usando SafeArea para evitar superposición con barras del sistema
         child: Center(
           child: SingleChildScrollView(
-            // Permite hacer scroll si el contenido es demasiado largo
             padding:
                 const EdgeInsets.symmetric(horizontal: 30.0, vertical: 20.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Logo más grande y centrado
+              children: <Widget>[
                 Image.asset(
                   'assets/LogoModificado.jpg',
-                  width: 180, // Aumentado el tamaño del logo (de 150 a 180)
-                  height: 180, // Aumentado el tamaño del logo (de 150 a 180)
+                  width: 180,
+                  height: 180,
                 ),
-                const SizedBox(height: 30), // Más espacio después del logo
+                const SizedBox(height: 30),
                 const Text(
                   'Registrarse',
                   style: TextStyle(
@@ -131,65 +229,51 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                 ),
                 const SizedBox(height: 30),
-
-                // Pestañas "Sign in" y "Sign up"
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     Expanded(
                       child: GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).pushReplacementNamed('/login');
-                        },
+                        onTap: () => Navigator.of(context)
+                            .pushReplacementNamed('/login'),
                         child: Column(
                           children: [
                             const Text(
                               'Sign in',
                               style: TextStyle(
-                                fontSize: 18,
-                                color: Color(0xFFd9c7ae),
-                              ),
+                                  fontSize: 18, color: Color(0xFFd9c7ae)),
                             ),
                             const SizedBox(height: 5),
                             Container(
-                              height: 3,
-                              width: 70,
-                              color: Colors.transparent,
-                            ),
+                                height: 3,
+                                width: 70,
+                                color: Colors.transparent),
                           ],
                         ),
                       ),
                     ),
                     Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          // Ya estamos en Sign Up
-                        },
-                        child: Column(
-                          children: [
-                            const Text(
-                              'Sign up',
-                              style: TextStyle(
+                      child: Column(
+                        children: [
+                          const Text(
+                            'Sign up',
+                            style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF6b4226),
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Container(
+                                color: Color(0xFF6b4226)),
+                          ),
+                          const SizedBox(height: 5),
+                          Container(
                               height: 3,
                               width: 70,
-                              color: const Color(0xFF6b4226),
-                            ),
-                          ],
-                        ),
+                              color: const Color(0xFF6b4226)),
+                        ],
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 30), // Más espacio antes de los campos
-
-                TextField(
+                const SizedBox(height: 30),
+                TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: InputDecoration(
@@ -260,15 +344,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     backgroundColor: const Color(0xFFc99450),
                     padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                        borderRadius: BorderRadius.circular(10)),
                     minimumSize: const Size(double.infinity, 0),
                   ),
                   child: _isLoading
                       ? const CircularProgressIndicator(
                           valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
-                        )
+                              AlwaysStoppedAnimation<Color>(Colors.white))
                       : const Text(
                           'Sign up',
                           style: TextStyle(
@@ -281,40 +363,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const Text('OR', style: TextStyle(color: Colors.grey)),
                 const SizedBox(height: 20),
                 Row(
-                  mainAxisAlignment:
-                      MainAxisAlignment.center, // Centrar los botones sociales
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _buildSocialButton('assets/google_logo.png', () {
-                      _showAlert('Función no disponible',
-                          'Por favor, regístrate con correo y contraseña.');
-                    }),
-                    const SizedBox(width: 20), // Espacio entre botones
+                    _buildSocialButton('assets/google_logo.png',
+                        _isLoading ? () {} : _registerWithGoogle),
+                    const SizedBox(width: 20),
                     _buildSocialButton('assets/facebook_logo.png', () {
                       _showAlert('Función no disponible',
-                          'Por favor, regístrate con correo y contraseña.');
+                          'Por favor, regístrate con correo y contraseña o Google.');
                     }),
                   ],
                 ),
                 const SizedBox(height: 20),
-                GestureDetector(
-                  onTap: () =>
-                      Navigator.pushReplacementNamed(context, '/login'),
-                  child: const Text(
-                    'By signing up, I agree with the',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () {
-                    // Lógica para mostrar términos y condiciones / política de privacidad
-                  },
-                  child: const Text(
-                    'T&C & Privacy Policy',
-                    style: TextStyle(
-                      color: Color(0xFF6b4226),
-                      decoration: TextDecoration.underline,
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  children: [
+                    const Text('By signing up, I agree with the ',
+                        style: TextStyle(color: Colors.grey)),
+                    GestureDetector(
+                      onTap: () {
+                        _showAlert('Términos y Condiciones',
+                            'Aquí irán las políticas de privacidad y uso de la aplicación.');
+                      },
+                      child: const Text(
+                        'T&C & Privacy Policy',
+                        style: TextStyle(
+                            color: Color(0xFF6b4226),
+                            decoration: TextDecoration.underline),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -324,18 +402,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // Widget para construir los botones sociales
   Widget _buildSocialButton(String imagePath, VoidCallback onPressed) {
     return InkWell(
       onTap: onPressed,
-      borderRadius: BorderRadius.circular(
-          30), // Hacer el borde redondeado (para un círculo perfecto, la mitad del tamaño)
+      borderRadius: BorderRadius.circular(30),
       child: Container(
-        width: 50, // Tamaño más pequeño para los botones sociales
-        height: 50, // Tamaño más pequeño para los botones sociales
+        width: 50,
+        height: 50,
         decoration: BoxDecoration(
           color: Colors.white,
-          shape: BoxShape.circle, // Forma circular
+          shape: BoxShape.circle,
           border: Border.all(color: Colors.grey.shade300),
           boxShadow: [
             BoxShadow(
@@ -346,8 +422,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           ],
         ),
-        padding: const EdgeInsets.all(
-            10), // Padding interno para la imagen (ajustado para el nuevo tamaño)
+        padding: const EdgeInsets.all(10),
         child: Image.asset(imagePath),
       ),
     );

@@ -1,5 +1,6 @@
 // lib/models/animal.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:manual_ganadero_flutter/models/animal_stat.dart'; // Ajusta la ruta según tus carpetas
 
 // Clase auxiliar para el registro de vacunas
 // Mismo que en register_animal_screen.dart para consistencia
@@ -56,6 +57,8 @@ class Animal {
   final List<VaccineRecord>? vaccinations; // Lista de registros de vacunas
   final bool? isPregnant; // ¿Está preñada? (Solo para hembras)
   final DateTime? pregnancyDate; // Fecha de preñez (Solo si isPregnant es true)
+  final String? purpose;
+  final DateTime? withdrawalDate; // Fecha de retiro por medicamentos
 
   Animal({
     required this.id,
@@ -83,6 +86,8 @@ class Animal {
     this.vaccinations, // Añadido al constructor
     this.isPregnant, // Añadido al constructor
     this.pregnancyDate, // Añadido al constructor
+    this.withdrawalDate,
+    this.purpose,
   });
 
   factory Animal.fromFirestore(Map<String, dynamic> data, String id) {
@@ -160,6 +165,7 @@ class Animal {
       description: data['description'] as String?,
       price: (data['price'] as num?)?.toDouble(),
       profileImageUrl: data['profileImageUrl'] as String?,
+      purpose: data['purpose'] as String?,
 
       // Mapeo de nuevos campos
       vaccinations: parsedVaccinations.isEmpty
@@ -167,6 +173,10 @@ class Animal {
           : parsedVaccinations, // Guardar como null si está vacío
       isPregnant: data['isPregnant'] as bool?,
       pregnancyDate: parsedPregnancyDate,
+
+      withdrawalDate: data['withdrawalDate'] != null
+          ? (data['withdrawalDate'] as Timestamp).toDate()
+          : null,
     );
   }
 
@@ -202,51 +212,10 @@ class Animal {
       if (isPregnant != null) 'isPregnant': isPregnant,
       if (pregnancyDate != null)
         'pregnancyDate': Timestamp.fromDate(pregnancyDate!),
-    };
-  }
-}
+      if (purpose != null) 'purpose': purpose,
 
-class AnimalStat {
-  final DateTime date;
-  final double value;
-  final String label;
-
-  AnimalStat({
-    required this.date,
-    required this.value,
-    required this.label,
-  });
-
-  factory AnimalStat.fromFirestore(Map<String, dynamic> data) {
-    DateTime? parsedDate;
-    final dynamic rawDate = data['date'];
-
-    if (rawDate is Timestamp) {
-      parsedDate = rawDate.toDate();
-    } else if (rawDate is String) {
-      try {
-        parsedDate = DateTime.parse(rawDate);
-      } catch (e) {
-        print(
-            'Error parsing AnimalStat date string from Firestore: $rawDate - $e');
-        parsedDate = DateTime.now();
-      }
-    } else {
-      parsedDate = DateTime.now();
-    }
-
-    return AnimalStat(
-      date: parsedDate, // Asegurarse de que no sea null
-      value: (data['value'] as num).toDouble(),
-      label: data['label'] ?? '',
-    );
-  }
-
-  Map<String, dynamic> toFirestore() {
-    return {
-      'date': Timestamp.fromDate(date),
-      'value': value,
-      'label': label,
+      if (withdrawalDate != null)
+        'withdrawalDate': Timestamp.fromDate(withdrawalDate!),
     };
   }
 }

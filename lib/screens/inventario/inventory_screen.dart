@@ -3,9 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:manual_ganadero_flutter/models/product.dart'; // Importa tu modelo Product
-import 'package:manual_ganadero_flutter/screens/inventario/add_edit_product_screen.dart'; // Crearemos esta pantalla
-import 'package:manual_ganadero_flutter/screens/inventario/product_detail_screen.dart'; // Crearemos esta pantalla
+import 'package:manual_ganadero_flutter/models/product.dart';
+import 'package:manual_ganadero_flutter/screens/inventario/add_edit_product_screen.dart';
+import 'package:manual_ganadero_flutter/screens/inventario/product_detail_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -15,9 +15,11 @@ class InventoryScreen extends StatefulWidget {
 }
 
 class _InventoryScreenState extends State<InventoryScreen> {
-  String? _selectedCategory; // Para el filtro de categoría
+  String? _selectedCategory;
+  String? _currentRanchId;
+  bool _isLoadingRanch = true;
 
-  // Define tus categorías (estas ya estaban en tu código)
+  // Define tus categorías
   final List<Map<String, dynamic>> _categories = const [
     {'name': 'Salud', 'icon': Icons.healing, 'color': Colors.pink},
     {
@@ -48,6 +50,59 @@ class _InventoryScreenState extends State<InventoryScreen> {
     {'name': 'Maquinaria', 'icon': Icons.agriculture, 'color': Colors.brown},
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentRanchId();
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (mounted) {
+        setState(() {
+          _currentRanchId = doc.data()?['currentRanchId'];
+          _isLoadingRanch = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingRanch = false;
+        });
+      }
+    }
+  }
+
+  // --- FUNCIÓN PARA OBTENER EL STREAM DE PRODUCTOS DE ESTE RANCHO ---
+  Stream<QuerySnapshot> _getProductsStream() {
+    if (_currentRanchId == null) return const Stream.empty();
+
+    final user = FirebaseAuth.instance.currentUser; // <-- Obtener usuario
+    if (user == null) return const Stream.empty();
+
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+        .collection('users') // <-- NUEVO
+        .doc(user.uid) // <-- NUEVO
+        .collection('ranches')
+        .doc(_currentRanchId)
+        .collection('products')
+        .orderBy('name', descending: false);
+
+    // Aplica el filtro de categoría SOLO si se ha seleccionado una
+    if (_selectedCategory != null) {
+      query = query.where('category', isEqualTo: _selectedCategory);
+    }
+
+    return query.snapshots();
+  }
+
   // Función para navegar a la pantalla de añadir/editar producto
   Future<void> _navigateToAddEditProductScreen() async {
     final result = await Navigator.push(
@@ -56,7 +111,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
         builder: (context) => const AddEditProductScreen(),
       ),
     );
-    // Si se añade o edita un producto, fuerza una reconstrucción del StreamBuilder
     if (result == true) {
       setState(() {});
     }
@@ -87,19 +141,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         ),
         iconTheme: const IconThemeData(color: Color(0xFF5e3a1c)),
-        // Eliminado el IconButton del AppBar, su funcionalidad se moverá al FAB
-        // actions: [
-        //   IconButton(
-        //     icon:
-        //         const Icon(Icons.add_circle_outline, color: Color(0xFF5e3a1c)),
-        //     onPressed: _navigateToAddEditProductScreen,
-        //   ),
-        // ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Campo de búsqueda (se mantiene igual)
+          // Campo de búsqueda
           Padding(
             padding:
                 const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -118,45 +164,37 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
           const SizedBox(height: 10),
 
-          // --- FILTROS DE CATEGORÍA CON "BOLITAS" (CHIPS DESLIZABLES) ---
+          // --- FILTROS DE CATEGORÍA CON CHIPS DESLIZABLES ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: SizedBox(
-              height: 100, // Altura para los chips deslizables
+              height: 100,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
-                itemCount: _categories.length + 1, // +1 para el chip "Ver todo"
+                itemCount: _categories.length + 1,
                 itemBuilder: (context, index) {
-                  // Primer chip: "Ver todo"
                   if (index == 0) {
                     return _buildFilterChip(
                       label: 'Ver todo',
                       icon: Icons.grid_view,
-                      color: Colors.grey[300], // Color para el chip "Ver todo"
-                      isSelected: _selectedCategory ==
-                          null, // Seleccionado si no hay categoría específica
+                      color: Colors.grey[300],
+                      isSelected: _selectedCategory == null,
                       onTap: () {
                         setState(() {
-                          _selectedCategory =
-                              null; // Quita el filtro de categoría
+                          _selectedCategory = null;
                         });
                       },
                     );
                   }
-                  // Chips para cada categoría definida
-                  final category = _categories[index - 1]; // Ajusta el índice
+                  final category = _categories[index - 1];
                   return _buildFilterChip(
                     label: category['name'],
                     icon: category['icon'],
-                    // Usa el color definido para el icono, y un fondo con opacidad
                     color: (category['color'] as Color).withOpacity(0.1),
-                    isSelected: _selectedCategory ==
-                        category[
-                            'name'], // Seleccionado si coincide con la categoría
+                    isSelected: _selectedCategory == category['name'],
                     onTap: () {
                       setState(() {
-                        _selectedCategory = category[
-                            'name']; // Establece la categoría seleccionada
+                        _selectedCategory = category['name'];
                       });
                     },
                   );
@@ -172,7 +210,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
             child: Text(
               _selectedCategory == null
                   ? 'Todo el Inventario'
-                  : 'Inventario de ${_selectedCategory!}',
+                  : 'Inventario de $_selectedCategory',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -181,55 +219,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ),
           ),
           const SizedBox(height: 10),
+
+          // --- LISTA DE PRODUCTOS ---
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              // La fuente de datos es ahora el Stream que aplica el filtro de Firestore
-              stream: _getProductsStream(user.uid),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(Color(0xFF6b4226)),
-                    ),
-                  );
-                }
-
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                      child: Text(_selectedCategory == null
-                          ? 'No hay productos en el inventario.'
-                          : 'No hay productos en la categoría "${_selectedCategory!}".'));
-                }
-
-                // Mapeamos los documentos a tu modelo Product
-                final products = snapshot.data!.docs.map((doc) {
-                  return Product.fromFirestore(
-                      doc.data() as Map<String, dynamic>, doc.id);
-                }).toList();
-
-                return ListView.builder(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16.0, vertical: 0),
-                  itemCount: products.length, // Usamos 'products' directamente
-                  itemBuilder: (context, index) {
-                    final product = products[index];
-                    return _buildProductCard(product);
-                  },
-                );
-              },
-            ),
+            child: _buildInventoryContent(),
           ),
         ],
       ),
-      // FloatingActionButton ahora tiene la funcionalidad del "+" de la parte superior
       floatingActionButton: FloatingActionButton(
-        onPressed:
-            _navigateToAddEditProductScreen, // Llama a la función para añadir producto
+        onPressed: _navigateToAddEditProductScreen,
         backgroundColor: const Color(0xFF6b4226),
         foregroundColor: Colors.white,
         child: const Icon(Icons.add),
@@ -237,24 +235,60 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  // --- FUNCIÓN PARA OBTENER EL STREAM DE PRODUCTOS (CON FILTRO DE FIRESTORE) ---
-  Stream<QuerySnapshot> _getProductsStream(String userId) {
-    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('products')
-        .orderBy('name', descending: false); // Siempre ordenar por nombre
-
-    // Aplica el filtro de categoría SOLO si se ha seleccionado una
-    if (_selectedCategory != null) {
-      query = query.where('category', isEqualTo: _selectedCategory);
+  // Se encarga de mostrar la carga, error de rancho o el StreamBuilder
+  Widget _buildInventoryContent() {
+    if (_isLoadingRanch) {
+      return const Center(
+          child: CircularProgressIndicator(color: Color(0xFF6b4226)));
     }
 
-    return query.snapshots();
-  }
-  // --- FIN FUNCIÓN DE STREAM ---
+    if (_currentRanchId == null) {
+      return const Center(
+          child: Text('No hay rancho seleccionado. Ve a tu perfil.'));
+    }
 
-  // --- MÉTODO _buildFilterChip (Modificado para resolver overflow en el label) ---
+    return StreamBuilder<QuerySnapshot>(
+      stream: _getProductsStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6b4226)),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+              child: Text(
+            _selectedCategory == null
+                ? 'No hay productos en tu inventario.'
+                : 'No hay productos en la categoría "$_selectedCategory".',
+            style: const TextStyle(color: Colors.grey, fontSize: 16),
+          ));
+        }
+
+        final products = snapshot.data!.docs.map((doc) {
+          return Product.fromFirestore(
+              doc.data() as Map<String, dynamic>, doc.id);
+        }).toList();
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 0),
+          itemCount: products.length,
+          itemBuilder: (context, index) {
+            final product = products[index];
+            return _buildProductCard(product);
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildFilterChip({
     required String label,
     required IconData icon,
@@ -288,14 +322,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
               ),
             ),
             const SizedBox(height: 5),
-            // Envuelto en Flexible y un Row para permitir que el texto se ajuste
             Flexible(
-              // <--- Nuevo: Flexible para permitir que el texto se ajuste
               child: Text(
                 label,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 11, // Reducido ligeramente el tamaño de la fuente
+                  fontSize: 11,
                   color: isSelected
                       ? const Color(0xFF6b4226)
                       : const Color(0xFF5e3a1c),
@@ -310,9 +342,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       ),
     );
   }
-  // --- FIN MÉTODO _buildFilterChip ---
 
-  // Método _buildProductCard (Modificado para mostrar cantidad y precio en líneas separadas)
   Widget _buildProductCard(Product product) {
     return GestureDetector(
       onTap: () async {
@@ -323,7 +353,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         );
         if (result == true) {
-          setState(() {}); // Esto forzará una reconstrucción del StreamBuilder
+          setState(() {});
         }
       },
       child: Card(
@@ -342,9 +372,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFFf5f0e1),
                   borderRadius: BorderRadius.circular(10.0),
-                  // Eliminado: image: product.imageUrl...
                 ),
-                // Icono predeterminado ya que no hay imagen de URL
                 child: const Icon(Icons.inventory_2,
                     size: 40, color: Color(0xFF6b4226)),
               ),
@@ -364,7 +392,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                    // Muestra la subcategoría en lugar de la descripción
                     Text(
                       product.subCategory,
                       style: TextStyle(
@@ -375,7 +402,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 8),
-                    // --- CAMBIO AQUÍ: CANTIDAD Y PRECIO EN LÍNEAS SEPARADAS ---
                     Text(
                       'Cantidad: ${product.quantity} ${product.unit}',
                       style: const TextStyle(
@@ -386,14 +412,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                     if (product.price != null)
                       Text(
-                        'Precio: \$${product.price!.toStringAsFixed(2)}', // Agregado "Precio:"
+                        'Precio: \$${product.price!.toStringAsFixed(2)}',
                         style: const TextStyle(
-                          fontSize: 15, // Ligeramente más grande para el precio
+                          fontSize: 15,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFFc99450),
                         ),
                       ),
-                    // --- FIN CAMBIO ---
                   ],
                 ),
               ),

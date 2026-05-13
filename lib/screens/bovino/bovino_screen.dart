@@ -9,6 +9,10 @@ import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart
 import 'package:manual_ganadero_flutter/screens/bovino/edit_animal_screen.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:intl/intl.dart'; // Para formatear fechas
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:manual_ganadero_flutter/widgets/voice_action_dialog.dart'; // Ajusta la ruta a donde lo hayas creado
+import 'package:manual_ganadero_flutter/widgets/live_voice_dialog.dart'; // <-- AGREGAR ESTO
 
 class BovinoScreen extends StatefulWidget {
   const BovinoScreen({super.key});
@@ -59,21 +63,24 @@ class _BovinoScreenState extends State<BovinoScreen> {
     return 'N/A';
   }
 
-  // --- Lógica de Consulta de Firestore ---
-  Stream<QuerySnapshot> _getAnimalsStream() {
+// --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
+  // Ahora recibe el ranchId como parámetro
+  Stream<QuerySnapshot> _getAnimalsStream(String currentRanchId) {
     if (_currentUser == null) {
       print(
           'Advertencia: No hay usuario autenticado. No se pueden cargar animales.');
       return Stream.empty();
     }
 
-    // CAMBIO CLAVE: Acceder a la subcolección 'animals' dentro del documento del usuario
     Query query = _firestore
         .collection('users')
         .doc(_currentUser!.uid)
+        .collection('ranches') // <-- NUEVO
+        .doc(currentRanchId) // <-- NUEVO
         .collection('animals');
 
-    print('Consultando animales para userId: ${_currentUser!.uid}');
+    print(
+        'Consultando animales para userId: ${_currentUser!.uid} en rancho: $currentRanchId');
 
     if (_searchText.isNotEmpty) {
       String searchEnd = '$_searchText\uf8ff';
@@ -88,23 +95,10 @@ class _BovinoScreenState extends State<BovinoScreen> {
       print('Filtro por sexo: $_selectedFilter');
     }
 
-    // Nota: El campo 'age' no se guarda directamente en Firestore en RegisterAnimalScreen.
-    // Necesitarás calcularlo a partir de 'birthDate' si quieres filtrar por edad.
-    // Por ahora, estos filtros de edad podrían no funcionar como esperas a menos que 'age'
-    // sea un campo que calculas y guardas explícitamente en Firestore.
-    // Mantengo la lógica si tienes planes de implementarlo.
     if (_selectedFilter == 'Joven') {
-      // Idealmente, aquí deberías calcular la edad en base a birthDate
-      // y filtrar, o tener un campo 'age' en Firestore.
-      // query = query.where('birthDate', isGreaterThanOrEqualTo: '...');
-      print(
-          'Filtro por edad: Joven (<= 2 años) - Requiere campo "age" o cálculo de "birthDate"');
+      print('Filtro por edad: Joven');
     } else if (_selectedFilter == 'Adulto') {
-      // Idealmente, aquí deberías calcular la edad en base a birthDate
-      // y filtrar, o tener un campo 'age' en Firestore.
-      // query = query.where('birthDate', isLessThan: '...');
-      print(
-          'Filtro por edad: Adulto (> 2 años) - Requiere campo "age" o cálculo de "birthDate"');
+      print('Filtro por edad: Adulto');
     }
 
     switch (_selectedOrder) {
@@ -114,14 +108,10 @@ class _BovinoScreenState extends State<BovinoScreen> {
       case 'name_desc':
         query = query.orderBy('name', descending: true);
         break;
-      // Los ordenamientos por 'age' también dependerán de tener un campo 'age' numérico
-      // o un birthDate formateado para ordenar correctamente.
       case 'age_asc':
-        // Podrías ordenar por birthDate si está en formatoYYYY-MM-DD
         query = query.orderBy('birthDate', descending: false);
         break;
       case 'age_desc':
-        // Podrías ordenar por birthDate si está en formatoYYYY-MM-DD
         query = query.orderBy('birthDate', descending: true);
         break;
       default:
@@ -132,6 +122,7 @@ class _BovinoScreenState extends State<BovinoScreen> {
 
     return query.snapshots();
   }
+  // --- FIN DE MODIFICACIÓN ---
 
   // --- Manejo de Acciones ---
   void _showSnackBar(String message) {
@@ -272,14 +263,29 @@ class _BovinoScreenState extends State<BovinoScreen> {
           }
         }
         // Eliminar el documento del animal
-        await _firestore
-            .collection('users')
-            .doc(_currentUser!.uid)
-            .collection('animals')
-            .doc(animalId)
-            .delete();
-        _showSnackBar(
-            'Animal y publicaciones asociadas eliminadas exitosamente.');
+        // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
+        DocumentSnapshot userDoc =
+            await _firestore.collection('users').doc(_currentUser!.uid).get();
+        String? currentRanchId =
+            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+
+        if (currentRanchId != null) {
+          // Eliminar el documento del animal en el rancho correcto
+          await _firestore
+              .collection('users')
+              .doc(_currentUser!.uid)
+              .collection('ranches')
+              .doc(currentRanchId)
+              .collection('animals')
+              .doc(animalId)
+              .delete();
+          await NotificationService().cancelNotification(animalId.hashCode);
+          _showSnackBar(
+              'Animal y publicaciones asociadas eliminadas exitosamente.');
+        } else {
+          _showSnackBar('Error: No hay rancho seleccionado.');
+        }
+        // --- FIN DE MODIFICACIÓN ---
       } catch (e) {
         print(
             'Error al eliminar animal o publicación desde BovinoScreen: ${e.toString()}');
@@ -379,39 +385,73 @@ class _BovinoScreenState extends State<BovinoScreen> {
               ],
             ),
           ),
+          // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
           Expanded(
             child: _currentUser == null
                 ? const Center(
                     child: Text('Inicia sesión para ver tus animales.'),
                   )
-                : StreamBuilder<QuerySnapshot>(
-                    stream: _getAnimalsStream(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
+                : StreamBuilder<DocumentSnapshot>(
+                    // 1. Primero escuchamos el documento del usuario para saber el rancho
+                    stream: _firestore
+                        .collection('users')
+                        .doc(_currentUser!.uid)
+                        .snapshots(),
+                    builder: (context, userSnapshot) {
+                      if (userSnapshot.connectionState ==
+                          ConnectionState.waiting) {
                         return const Center(
                             child: CircularProgressIndicator(
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Color(0xFF6b4226)),
-                        ));
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Color(0xFF6b4226))));
                       }
-                      if (snapshot.hasError) {
-                        return Center(child: Text('Error: ${snapshot.error}'));
-                      }
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+
+                      String? currentRanchId = (userSnapshot.data?.data()
+                          as Map<String, dynamic>?)?['currentRanchId'];
+
+                      if (currentRanchId == null) {
                         return const Center(
-                            child: Text('No hay animales registrados.'));
+                            child: Text(
+                                'Por favor selecciona o registra un rancho desde el Inicio.',
+                                style: TextStyle(
+                                    fontSize: 16, color: Colors.grey)));
                       }
 
-                      final animals = snapshot.data!.docs.map((doc) {
-                        return Animal.fromFirestore(
-                            doc.data() as Map<String, dynamic>, doc.id);
-                      }).toList();
+                      // 2. Ahora escuchamos los animales de ESE rancho
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: _getAnimalsStream(
+                            currentRanchId), // Le pasamos el ID del rancho
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                                child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  Color(0xFF6b4226)),
+                            ));
+                          }
+                          if (snapshot.hasError) {
+                            return Center(
+                                child: Text('Error: ${snapshot.error}'));
+                          }
+                          if (!snapshot.hasData ||
+                              snapshot.data!.docs.isEmpty) {
+                            return const Center(
+                                child: Text('No hay animales registrados.'));
+                          }
 
-                      return ListView.builder(
-                        itemCount: animals.length,
-                        itemBuilder: (context, index) {
-                          final animal = animals[index];
-                          return _buildAnimalCard(animal);
+                          final animals = snapshot.data!.docs.map((doc) {
+                            return Animal.fromFirestore(
+                                doc.data() as Map<String, dynamic>, doc.id);
+                          }).toList();
+
+                          return ListView.builder(
+                            itemCount: animals.length,
+                            itemBuilder: (context, index) {
+                              final animal = animals[index];
+                              return _buildAnimalCard(animal);
+                            },
+                          );
                         },
                       );
                     },
@@ -419,11 +459,31 @@ class _BovinoScreenState extends State<BovinoScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _handleNavigateToRegisterAnimal,
-        backgroundColor: const Color(0xFF6b4226),
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
+// --- FIN DE MODIFICACIÓN ---
+      floatingActionButton: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          // BOLITA DEL MICRÓFONO
+          FloatingActionButton(
+            heroTag: "btn_voice",
+            onPressed: () {
+              LiveVoiceDialog.show(context); // <-- LLAMA A LA NUEVA PANTALLA
+            },
+            backgroundColor: const Color(0xFFc99450), // Color fijo
+            foregroundColor: Colors.white,
+            child: const Icon(Icons.mic),
+          ),
+          const SizedBox(width: 15), // Espacio entre las dos bolitas
+
+          // BOLITA DE REGISTRO ORIGINAL
+          FloatingActionButton(
+            heroTag: "btn_add",
+            onPressed: _handleNavigateToRegisterAnimal,
+            backgroundColor: const Color(0xFF6b4226),
+            foregroundColor: Colors.white,
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }
@@ -486,6 +546,7 @@ class _BovinoScreenState extends State<BovinoScreen> {
                     // MODIFICACIÓN: Mostrar Fecha de Nacimiento en lugar de Edad
                     _buildInfoRow('Fecha de Nacimiento',
                         _formatDateTime(animal.birthDate)),
+                    _buildInfoRow('Propósito', animal.purpose),
                   ],
                 ),
               ),

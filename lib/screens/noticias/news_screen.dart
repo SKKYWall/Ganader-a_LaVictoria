@@ -1,6 +1,8 @@
 // lib/screens/principal/news_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
 class NewsScreen extends StatelessWidget {
   const NewsScreen({super.key});
@@ -21,56 +23,83 @@ class NewsScreen extends StatelessWidget {
         title: const Text(
           'Noticias y Novedades',
           style: TextStyle(
-            fontSize: 24,
+            fontSize: 22,
             fontWeight: FontWeight.bold,
             color: Color(0xFF5e3a1c),
           ),
         ),
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildNewsCard(
-              title:
-                  'Nueva Actualización de la App: ¡Gestión de Notificaciones!',
-              date: '20 de Junio, 2025',
-              content:
-                  'Hemos lanzado una nueva función que te permite gestionar tus preferencias de notificación directamente desde la sección de perfil. ¡Mantente al día con las últimas novedades de tu ganado!',
-              imageUrl:
-                  'https://placehold.co/600x300/c99450/FFFFFF?text=Noticias+App',
-            ),
-            _buildNewsCard(
-              title: 'Consejos para la Salud del Ganado en Verano',
-              date: '15 de Junio, 2025',
-              content:
-                  'Con la llegada del verano, es crucial proteger a tu ganado del calor. Asegura suficiente agua fresca, sombra y considera ajustes en la alimentación para prevenir el estrés por calor.',
-              imageUrl:
-                  'https://placehold.co/600x300/6b4226/FFFFFF?text=Salud+Ganado',
-            ),
-            _buildNewsCard(
-              title: 'Tendencias del Mercado Ganadero en Latinoamérica',
-              date: '10 de Junio, 2025',
-              content:
-                  'Un análisis reciente muestra un crecimiento constante en el mercado de la carne de res en la región, impulsado por la demanda interna y las exportaciones. Conoce las últimas cifras y predicciones.',
-              imageUrl:
-                  'https://placehold.co/600x300/5e3a1c/FFFFFF?text=Mercado+Ganadero',
-            ),
-            const SizedBox(height: 20),
-            Center(
-              child: Text(
-                'Mantente atento a más noticias y actualizaciones.',
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+      // Escuchamos a Firebase en tiempo real
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('global_news')
+            .orderBy('date', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          // --- ESTO TE AVISARÁ SI TE FALTAN REGLAS EN FIREBASE ---
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(
+                  'Error de Firebase:\n${snapshot.error}',
+                  style: const TextStyle(color: Colors.red, fontSize: 16),
+                  textAlign: TextAlign.center,
+                ),
               ),
-            ),
-          ],
-        ),
+            );
+          }
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+                child: CircularProgressIndicator(color: Color(0xFFc99450)));
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Text(
+                'No hay noticias publicadas por el momento.',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+            );
+          }
+
+          // Construir la lista de noticias desde la base de datos
+          return ListView.builder(
+            padding: const EdgeInsets.all(16.0),
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              var data =
+                  snapshot.data!.docs[index].data() as Map<String, dynamic>;
+
+              // Extraer datos de forma segura
+              String title = data['title'] ?? 'Sin título';
+              String content = data['content'] ?? '';
+              String? imageUrl = data['imageUrl'];
+
+              // Formatear la fecha
+              DateTime date = DateTime.now();
+              if (data['date'] != null) {
+                date = (data['date'] as Timestamp).toDate();
+              }
+              String formattedDate =
+                  DateFormat('dd \'de\' MMMM, yyyy', 'es_MX').format(date);
+
+              return _buildNewsCard(
+                title: title,
+                date: formattedDate,
+                content: content,
+                imageUrl: imageUrl,
+              );
+            },
+          );
+        },
       ),
     );
   }
 
+  // Tarjeta de diseño mejorada
   Widget _buildNewsCard({
     required String title,
     required String date,
@@ -80,27 +109,35 @@ class NewsScreen extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 20.0),
       elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15.0),
+      ),
+      clipBehavior: Clip.antiAlias,
       color: Colors.white,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Si subiste una imagen, se muestra. Si no, muestra un banner genérico elegante.
           if (imageUrl != null && imageUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(15.0)),
-              child: Image.network(
-                imageUrl,
+            Image.network(
+              imageUrl,
+              height: 180,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Container(
                 height: 180,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(
-                  height: 180,
-                  color: Colors.grey[200],
-                  child: const Icon(Icons.image_not_supported,
-                      size: 80, color: Colors.grey),
-                ),
+                color: Colors.grey[200],
+                child: const Icon(Icons.broken_image,
+                    size: 80, color: Colors.grey),
               ),
+            )
+          else
+            Container(
+              height: 100,
+              width: double.infinity,
+              color: const Color(0xFFc99450).withOpacity(0.2),
+              child: const Icon(Icons.newspaper,
+                  size: 50, color: Color(0xFF5e3a1c)),
             ),
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -110,7 +147,7 @@ class NewsScreen extends StatelessWidget {
                 Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF5e3a1c),
                   ),
@@ -124,12 +161,13 @@ class NewsScreen extends StatelessWidget {
                     fontStyle: FontStyle.italic,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Text(
                   content,
                   style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 14,
                     color: Colors.black87,
+                    height: 1.4,
                   ),
                 ),
               ],
