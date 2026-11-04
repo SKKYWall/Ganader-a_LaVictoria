@@ -1,0 +1,12 @@
+0 Nelore
+1 charolais
+2 dermatofitosis
+3 brahman gris
+4 brahman rojo
+5 brahman negro
+6 simmental
+7 sano
+8 heridas
+9 berrugas
+10 angus
+11 flacos
