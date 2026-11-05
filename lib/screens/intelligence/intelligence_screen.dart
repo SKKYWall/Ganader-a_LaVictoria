@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/models/calendar.dart';
+import 'package:manual_ganadero_flutter/models/transaction.dart' as fin;
 import 'package:manual_ganadero_flutter/services/quota_service.dart';
 import 'package:manual_ganadero_flutter/screens/profile/donations_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -149,6 +150,8 @@ class _RagEngine {
     required List<Animal> allAnimals,
     required List<CalendarEvent> events,
     required Animal? selectedAnimal,
+    double? monthlyIncome,
+    double? monthlyExpense,
   }) {
     final intents = detectIntent(query, mode);
     final buf = StringBuffer();
@@ -261,6 +264,47 @@ class _RagEngine {
             .toSet();
         buf.writeln('Machos:$machos|Hembras:$hembras|Preñadas:$prenadas');
         if (breeds.isNotEmpty) buf.writeln('Razas:${breeds.join(",")}');
+
+        if (monthlyIncome != null && monthlyExpense != null) {
+          final balance = monthlyIncome - monthlyExpense;
+          buf.writeln(
+              'Finanzas este mes:Ingresos \$${monthlyIncome.toStringAsFixed(0)}'
+              '|Egresos \$${monthlyExpense.toStringAsFixed(0)}'
+              '|Balance \$${balance.toStringAsFixed(0)}');
+        }
+
+        // Vientres sin servicio reproductivo reciente (abiertas, no
+        // preñadas) — para poder responder "¿qué vacas llevan más tiempo
+        // sin parir/sin servicio?" con datos reales, no solo el estado.
+        final abiertas = allAnimals
+            .where((a) =>
+                a.sex == 'Hembra' &&
+                a.isPregnant != true &&
+                (a.purpose == 'Reproductora' || a.purpose == 'Leche'))
+            .toList();
+        if (abiertas.isNotEmpty) {
+          final withGap = abiertas.map((a) {
+            final events = a.reproductiveEvents;
+            DateTime? lastService;
+            if (events != null && events.isNotEmpty) {
+              lastService = events
+                  .map((e) => e.serviceDate)
+                  .reduce((x, y) => x.isAfter(y) ? x : y);
+            }
+            final days = lastService != null
+                ? now.difference(lastService).inDays
+                : null;
+            return (animal: a, days: days);
+          }).toList()
+            ..sort((x, y) => (y.days ?? 999999).compareTo(x.days ?? 999999));
+          buf.writeln('\n[Vientres abiertas (sin servicio reciente):]');
+          for (final e in withGap.take(8)) {
+            final label = e.days != null
+                ? '${e.days} días desde último servicio'
+                : 'sin servicio registrado';
+            buf.writeln('  ${e.animal.name}|${e.animal.earTagNumber}|$label');
+          }
+        }
       }
 
       List<Animal> relevant = [];
@@ -527,6 +571,8 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
   List<Animal> _animals = [];
   List<CalendarEvent> _upcomingEvents = [];
   Animal? _selectedAnimal;
+  double? _monthlyIncome;
+  double? _monthlyExpense;
 
   // ── CUOTA ────────────────────────────────────────────────────────────────
   QuotaStatus? _quotaStatus;
@@ -634,11 +680,35 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
           .map((d) => CalendarEvent.fromFirestore(d.data(), d.id))
           .toList();
 
+      // Gasto/ingreso del mes en curso, para que el chat pueda responder
+      // preguntas como "¿cuánto gastamos en medicamentos?" con datos
+      // reales en vez de no tener ninguna referencia financiera.
+      final startOfMonth = DateTime(now.year, now.month, 1);
+      final transSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('ranches')
+          .doc(ranchId)
+          .collection('transactions')
+          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+          .get();
+      double monthlyIncome = 0, monthlyExpense = 0;
+      for (final d in transSnap.docs) {
+        final t = fin.Transaction.fromFirestore(d.data(), d.id);
+        if (t.type == 'income') {
+          monthlyIncome += t.amount;
+        } else {
+          monthlyExpense += t.amount;
+        }
+      }
+
       setState(() {
         _currentRanchId = ranchId;
         _currentRanchName = ranchName;
         _animals = animals;
         _upcomingEvents = events;
+        _monthlyIncome = monthlyIncome;
+        _monthlyExpense = monthlyExpense;
         _isLoadingContext = false;
       });
     } catch (e) {
@@ -779,7 +849,9 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
               ranchName: _currentRanchName ?? '',
               allAnimals: _animals,
               events: _upcomingEvents,
-              selectedAnimal: _selectedAnimal)
+              selectedAnimal: _selectedAnimal,
+              monthlyIncome: _monthlyIncome,
+              monthlyExpense: _monthlyExpense)
           : '';
 
       final prompt = _ModePrompts.build(
