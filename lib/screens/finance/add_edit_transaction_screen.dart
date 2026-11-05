@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:manual_ganadero_flutter/models/transaction.dart'; // Importa tu modelo Transaction
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/core/finance_categories.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class AddEditTransactionScreen extends StatefulWidget {
   final Transaction? transaction; // Si es null, añadir; si no, editar
@@ -439,7 +440,7 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
             decoration: InputDecoration(
               labelText: '¿Asociar a un animal? (Opcional)',
               prefixIcon:
-                  const Icon(Icons.pets, color: Color(0xFF5e3a1c)),
+                  const Icon(FontAwesomeIcons.cow, color: Color(0xFF5e3a1c)),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 0),
               labelStyle: const TextStyle(color: Color(0xFF5e3a1c)),

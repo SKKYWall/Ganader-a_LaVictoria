@@ -23,7 +23,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
   // Inventario
   int _total = 0, _hembras = 0, _machos = 0, _gestantes = 0;
   Map<String, int> _razas = {};
-  Map<String, int> _propositos = {};
 
   // Métricas productivas
   double _avgBirthWeight = 0;
@@ -95,7 +94,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
       int activeCount = 0;
       int h = 0, m = 0, g = 0;
       Map<String, int> rCount = {};
-      Map<String, int> pCount = {};
       double totalBW = 0, totalWW = 0, totalGDP = 0;
       int cntBW = 0, cntWW = 0, cntGDP = 0;
       int vac30 = 0, sinVac = 0;
@@ -124,10 +122,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
         // Razas
         final raza = data['breed'] as String? ?? 'Sin raza';
         rCount[raza] = (rCount[raza] ?? 0) + 1;
-
-        // Propósitos
-        final prop = data['purpose'] as String? ?? 'Sin propósito';
-        pCount[prop] = (pCount[prop] ?? 0) + 1;
 
         // Peso al nacer
         final bw = (data['birthWeight'] as num?)?.toDouble();
@@ -222,7 +216,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
         _machos = m;
         _gestantes = g;
         _razas = rCount;
-        _propositos = pCount;
         _avgBirthWeight = cntBW > 0 ? totalBW / cntBW : 0;
         _countBirthWeight = cntBW;
         _avgWeaningWeight = cntWW > 0 ? totalWW / cntWW : 0;
@@ -288,9 +281,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                         const SizedBox(height: 12),
                         _buildInventorySummary(),
                         const SizedBox(height: 24),
-                        _buildSectionTitle("Distribución por Sexo"),
-                        _buildPieChart(_hembras, _machos, "Hembras", "Machos"),
-                        const SizedBox(height: 24),
                         _buildSectionTitle("Métricas Productivas"),
                         const SizedBox(height: 12),
                         _buildProductiveMetrics(),
@@ -305,9 +295,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
                         const SizedBox(height: 24),
                         _buildSectionTitle("Razas Principales"),
                         _buildBarChart(),
-                        const SizedBox(height: 24),
-                        _buildSectionTitle("Uso del Inventario"),
-                        _buildPurposeList(),
                         const SizedBox(height: 40),
                       ],
                     ),
@@ -575,79 +562,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
     );
   }
 
-  Widget _buildPieChart(int val1, int val2, String label1, String label2) {
-    if (val1 == 0 && val2 == 0) {
-      return Container(
-        height: 180,
-        margin: const EdgeInsets.only(top: 12),
-        decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(16)),
-        child: const Center(
-            child: Text("Sin datos en este rancho",
-                style: TextStyle(color: Colors.grey))),
-      );
-    }
-    return Container(
-      height: 180,
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(16)),
-      child: Row(
-        children: [
-          Expanded(
-            child: PieChart(
-              PieChartData(
-                sections: [
-                  PieChartSectionData(
-                      value: val1.toDouble(),
-                      color: Colors.pink.shade300,
-                      title: '$val1\n$label1',
-                      radius: 55,
-                      titleStyle: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          fontSize: 11)),
-                  PieChartSectionData(
-                      value: val2.toDouble(),
-                      color: Colors.blue.shade400,
-                      title: '$val2\n$label2',
-                      radius: 55,
-                      titleStyle: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          fontSize: 11)),
-                ],
-                centerSpaceRadius: 30,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _legend(Colors.pink.shade300, '$label1: $val1'),
-              const SizedBox(height: 8),
-              _legend(Colors.blue.shade400, '$label2: $val2'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _legend(Color color, String text) {
-    return Row(
-      children: [
-        Container(
-            width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(text, style: const TextStyle(fontSize: 12, color: Colors.black87)),
-      ],
-    );
-  }
-
   Widget _buildAgeDistribution() {
     final hasData = _countAge > 0;
     final avgYears = _avgAgeMonths / 12;
@@ -730,10 +644,36 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
     if (_razas.isEmpty) return const SizedBox();
     final sorted = _razas.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    final top = sorted.take(6).toList();
+
+    // Con una sola raza registrada (o ninguna capturada) una gráfica de
+    // barras no aporta nada — se muestra como una tarjeta compacta en vez
+    // de ocupar el mismo espacio que cuando hay varias razas que comparar.
+    if (sorted.length <= 1) {
+      final onlyBreed = sorted.first;
+      return Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+            color: Colors.white, borderRadius: BorderRadius.circular(16)),
+        child: Row(
+          children: [
+            Icon(FontAwesomeIcons.cow, color: _gold, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text(onlyBreed.key,
+                    style: const TextStyle(fontWeight: FontWeight.w600))),
+            Text('${onlyBreed.value} de $_total',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, color: Colors.grey)),
+          ],
+        ),
+      );
+    }
+
+    final top = sorted.take(5).toList();
 
     return Container(
-      height: 220,
+      height: 150,
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
       decoration: BoxDecoration(
@@ -788,72 +728,6 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildPurposeList() {
-    if (_propositos.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.only(top: 12),
-        child: Text("Sin datos", style: TextStyle(color: Colors.grey)),
-      );
-    }
-    final sorted = _propositos.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    final colors = [
-      Colors.teal, Colors.orange, Colors.blue, Colors.pink, Colors.purple,
-      Colors.green,
-    ];
-
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(16)),
-      child: Column(
-        children: sorted.asMap().entries.map((entry) {
-          final i = entry.key;
-          final e = entry.value;
-          final pct = _total > 0 ? (e.value / _total * 100) : 0.0;
-          final color = colors[i % colors.length];
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(children: [
-                      Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                              color: color, shape: BoxShape.circle)),
-                      const SizedBox(width: 8),
-                      Text(e.key,
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                    ]),
-                    Text('${e.value} (${pct.toStringAsFixed(1)}%)',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.black87)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: _total > 0 ? e.value / _total : 0,
-                    minHeight: 6,
-                    backgroundColor: Colors.grey.shade100,
-                    valueColor: AlwaysStoppedAnimation<Color>(color),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
       ),
     );
   }
