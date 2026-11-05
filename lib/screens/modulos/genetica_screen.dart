@@ -4,6 +4,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
+import 'package:manual_ganadero_flutter/core/breed_groups.dart';
+import 'package:manual_ganadero_flutter/core/contemporary_groups.dart';
+import 'package:manual_ganadero_flutter/core/pedigree.dart';
+import 'package:manual_ganadero_flutter/core/weaning_gdp.dart';
+
+// Comparaciones de sexo normalizadas (espacios y mayúsculas no deberían
+// importar — un dato capturado como " macho" o "MACHO" es válido).
+bool _isMale(String? sex) => sex?.trim().toLowerCase() == 'macho';
+bool _isFemale(String? sex) => sex?.trim().toLowerCase() == 'hembra';
+bool _isDairyPurpose(String? purpose) =>
+    purpose?.trim().toLowerCase() == 'leche';
 
 class GeneticaScreen extends StatefulWidget {
   const GeneticaScreen({super.key});
@@ -74,24 +85,40 @@ class _GeneticaScreenState extends State<GeneticaScreen>
   }
 
   // ─── Calificación por estrellas (carne) ───────────────────────────────────
-  int _calculateMeatStars(Animal animal) {
+  // Null = "No aplica" (el animal es de propósito Leche — las estrellas de
+  // carne no tienen sentido ahí). 0 = sin datos suficientes para calificar.
+  // Los umbrales se ajustan por grupo racial: comparar el destete de un
+  // Cebú de marco chico contra el umbral de un Charolais castiga una raza
+  // que simplemente es más pequeña por naturaleza, no peor genéticamente.
+  static const Map<BreedGroup, double> _meatStarThresholdMultiplier = {
+    BreedGroup.continental: 1.0,
+    BreedGroup.lechera: 1.0,
+    BreedGroup.cruzaOtro: 0.92,
+    BreedGroup.cebu: 0.85,
+  };
+
+  int? _calculateMeatStars(Animal animal) {
+    if (_isDairyPurpose(animal.purpose)) return null;
+    final mult = _meatStarThresholdMultiplier[breedGroupOf(animal.breed)] ?? 1.0;
     double score = 0;
     if (animal.weaningWeight != null) {
-      if (animal.weaningWeight! >= 220) {
+      final w = animal.weaningWeight!;
+      if (w >= 220 * mult) {
         score += 5;
-      } else if (animal.weaningWeight! >= 180) {
+      } else if (w >= 180 * mult) {
         score += 4;
-      } else if (animal.weaningWeight! >= 150) {
+      } else if (w >= 150 * mult) {
         score += 3;
       } else {
         score += 2;
       }
     } else if (animal.birthWeight != null) {
-      if (animal.birthWeight! >= 40) {
+      final w = animal.birthWeight!;
+      if (w >= 40 * mult) {
         score += 5;
-      } else if (animal.birthWeight! >= 35) {
+      } else if (w >= 35 * mult) {
         score += 4;
-      } else if (animal.birthWeight! >= 30) {
+      } else if (w >= 30 * mult) {
         score += 3;
       } else {
         score += 2;
@@ -102,35 +129,66 @@ class _GeneticaScreenState extends State<GeneticaScreen>
     return score.clamp(1, 5).toInt();
   }
 
-  // ─── DEP destete (diferencia vs promedio del hato) ────────────────────────
-  double _calcDEP(Animal animal, double herdAvgWeaning) {
-    if (animal.weaningWeight == null) return 0;
-    return animal.weaningWeight! - herdAvgWeaning;
+  // ─── DEP destete (diferencia vs grupo de contemporáneos) ──────────────────
+  // Se compara contra animales de la misma raza + sexo + año de nacimiento
+  // cuando hay suficientes (ver ContemporaryGroups); si no, se cae al
+  // promedio general del hato y se indica explícitamente en la UI, para no
+  // aparentar una precisión de EPD certificado que esta app no calcula.
+  (double dep, bool isContemporary)? _calcDEP(
+      Animal animal, ContemporaryGroups groups) {
+    if (animal.weaningWeight == null) return null;
+    final (avg, isContemporary) = groups.averageFor(animal);
+    return (animal.weaningWeight! - avg, isContemporary);
   }
 
-  // ─── GDP (nacimiento → destete, 205 días estándar) ────────────────────────
-  double _calcGDP(Animal animal) {
-    if (animal.birthWeight == null || animal.weaningWeight == null) return 0;
-    return (animal.weaningWeight! - animal.birthWeight!) / 205;
+  // ─── Verificación de consanguinidad (coeficiente de Wright) ───────────────
+  InbreedingResult _checkInbreeding(
+      Animal mother, Animal father, Map<String, Animal> byEarTag) {
+    return calculateInbreeding(father, mother, byEarTag);
   }
 
-  // ─── Verificación de consanguinidad ───────────────────────────────────────
-  String? _checkInbreeding(Animal mother, Animal father) {
-    if (mother.father != null && mother.father == father.earTagNumber) {
-      return 'CRÍTICO: Cruza de Padre e Hija.';
+  Color _riskColor(InbreedingRisk risk) {
+    switch (risk) {
+      case InbreedingRisk.critical:
+        return Colors.red;
+      case InbreedingRisk.high:
+        return Colors.deepOrange;
+      case InbreedingRisk.moderate:
+        return Colors.orange;
+      case InbreedingRisk.low:
+        return Colors.amber.shade700;
+      case InbreedingRisk.none:
+        return Colors.green;
     }
-    if (father.mother != null && father.mother == mother.earTagNumber) {
-      return 'CRÍTICO: Cruza de Madre e Hijo.';
+  }
+
+  // ─── Riesgo de distocia (parto difícil) ───────────────────────────────────
+  // Compara el peso al nacer proyectado contra el historial de partos
+  // propios de la madre (sus crías previas ya registradas en el sistema,
+  // ligadas por earTag) cuando existe; si la madre no tiene crías previas
+  // registradas, usa el promedio del hato como referencia general.
+  String? _checkDystociaRisk(Animal mother, double predictedBirthWeight,
+      List<Animal> allAnimals, double herdAvgBirth) {
+    final motherTag = mother.earTagNumber.trim();
+    final priorCalves = allAnimals
+        .where((a) => a.mother != null && a.mother == motherTag && a.birthWeight != null)
+        .map((a) => a.birthWeight!)
+        .toList();
+
+    if (priorCalves.isNotEmpty) {
+      final maxPrior = priorCalves.reduce((a, b) => a > b ? a : b);
+      if (predictedBirthWeight > maxPrior * 1.15) {
+        return 'El peso al nacer proyectado (${predictedBirthWeight.toStringAsFixed(1)} kg) '
+            'supera en más de 15% el mayor peso de cría que esta madre ha tenido antes '
+            '(${maxPrior.toStringAsFixed(1)} kg) — vigila de cerca el parto.';
+      }
+      return null;
     }
-    if (mother.father != null &&
-        father.father != null &&
-        mother.father == father.father) {
-      return 'ALTO RIESGO: Medios hermanos (Mismo Padre).';
-    }
-    if (mother.mother != null &&
-        father.mother != null &&
-        mother.mother == father.mother) {
-      return 'ALTO RIESGO: Medios hermanos (Misma Madre).';
+
+    if (predictedBirthWeight > herdAvgBirth * 1.20) {
+      return 'El peso al nacer proyectado (${predictedBirthWeight.toStringAsFixed(1)} kg) '
+          'es notablemente mayor al promedio del hato (${herdAvgBirth.toStringAsFixed(1)} kg). '
+          'Esta madre no tiene partos previos registrados para comparar — vigila de cerca el parto.';
     }
     return null;
   }
@@ -166,7 +224,7 @@ class _GeneticaScreenState extends State<GeneticaScreen>
           labelStyle:
               const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
           tabs: const [
-            Tab(icon: Icon(Icons.analytics, size: 20), text: "Análisis DEP"),
+            Tab(icon: Icon(Icons.analytics, size: 20), text: "Índice vs. Hato"),
             Tab(
                 icon: Icon(Icons.monitor_heart, size: 20),
                 text: "Simulador"),
@@ -211,18 +269,22 @@ class _GeneticaScreenState extends State<GeneticaScreen>
           final herdAvgBirth =
               countBirth > 0 ? totalBirth / countBirth : 35.0;
 
-          final females =
-              allAnimals.where((a) => a.sex == 'Hembra').toList();
-          final males =
-              allAnimals.where((a) => a.sex == 'Macho').toList();
+          final contemporaryGroups = ContemporaryGroups.fromAnimals(allAnimals);
+          // Incluye animales de cualquier estado (activo/inactivo) — el
+          // pedigrí de un animal archivado sigue siendo real y necesario
+          // para resolver la genealogía de sus descendientes.
+          final byEarTag = buildEarTagIndex(allAnimals);
+
+          final females = allAnimals.where((a) => _isFemale(a.sex)).toList();
+          final males = allAnimals.where((a) => _isMale(a.sex)).toList();
 
           return TabBarView(
             controller: _tabController,
             children: [
-              _buildDepTab(allAnimals, herdAvgWeaning, herdAvgBirth),
-              _buildSimulatorTab(
-                  females, males, herdAvgWeaning, herdAvgBirth),
-              _buildRankingTab(allAnimals, herdAvgWeaning),
+              _buildDepTab(allAnimals, contemporaryGroups),
+              _buildSimulatorTab(females, males, herdAvgWeaning, herdAvgBirth,
+                  allAnimals, byEarTag),
+              _buildRankingTab(allAnimals, contemporaryGroups),
             ],
           );
         },
@@ -233,8 +295,7 @@ class _GeneticaScreenState extends State<GeneticaScreen>
   // ═══════════════════════════════════════════════════════════════════════════
   // TAB 1: ANÁLISIS DEP
   // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildDepTab(
-      List<Animal> animals, double herdAvgWeaning, double herdAvgBirth) {
+  Widget _buildDepTab(List<Animal> animals, ContemporaryGroups groups) {
     // Filtrado por nombre o número de arete (insensible a mayúsculas).
     final q = _depQuery.trim().toLowerCase();
     final filtered = q.isEmpty
@@ -278,14 +339,15 @@ class _GeneticaScreenState extends State<GeneticaScreen>
               itemBuilder: (context, index) {
                 final animal = filtered[index];
         final meatStars = _calculateMeatStars(animal);
-        final gdp = _calcGDP(animal);
-        final depWeaning = _calcDEP(animal, herdAvgWeaning);
+        final gdp = calculateWeaningGdp(animal);
+        final depWeaning = _calcDEP(animal, groups);
+        final isMale = _isMale(animal.sex);
 
         String rasgoPartoLabel =
-            animal.sex == 'Macho' ? 'Tamaño de Crías:' : 'Facilidad de Parto:';
+            isMale ? 'Tamaño de Crías:' : 'Facilidad de Parto:';
         String rasgoPartoValor = 'Faltan datos';
         if (animal.birthWeight != null) {
-          if (animal.sex == 'Macho') {
+          if (isMale) {
             if (animal.birthWeight! < 32) {
               rasgoPartoValor = 'Ligeras (Partos Fáciles)';
             } else if (animal.birthWeight! <= 38) {
@@ -311,30 +373,27 @@ class _GeneticaScreenState extends State<GeneticaScreen>
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
           child: ExpansionTile(
             leading: CircleAvatar(
-              backgroundColor: animal.sex == 'Macho'
-                  ? Colors.blue.shade50
-                  : Colors.pink.shade50,
+              backgroundColor: isMale ? Colors.blue.shade50 : Colors.pink.shade50,
               child: Icon(FontAwesomeIcons.dna,
-                  color: animal.sex == 'Macho' ? Colors.blue : Colors.pink,
-                  size: 20),
+                  color: isMale ? Colors.blue : Colors.pink, size: 20),
             ),
             title: Text('${animal.name} (${animal.earTagNumber})',
                 style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Row(children: [
-              ...List.generate(
-                  5,
-                  (i) => Icon(
-                      i < meatStars ? Icons.star : Icons.star_border,
-                      color: Colors.amber,
-                      size: 16)),
+              if (meatStars == null)
+                const Text('No aplica (propósito Leche)',
+                    style: TextStyle(fontSize: 10, color: Colors.grey))
+              else
+                ...List.generate(
+                    5,
+                    (i) => Icon(
+                        i < meatStars ? Icons.star : Icons.star_border,
+                        color: Colors.amber,
+                        size: 16)),
               const SizedBox(width: 6),
-              Text(
-                  animal.sex == 'Macho' ? 'Semental' : 'Vientre',
+              Text(isMale ? 'Semental' : 'Vientre',
                   style: TextStyle(
-                      fontSize: 10,
-                      color: animal.sex == 'Macho'
-                          ? Colors.blue
-                          : Colors.pink)),
+                      fontSize: 10, color: isMale ? Colors.blue : Colors.pink)),
             ]),
             trailing: GestureDetector(
               onTap: () => Navigator.push(
@@ -356,15 +415,16 @@ class _GeneticaScreenState extends State<GeneticaScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _sectionLabel('RENDIMIENTO (DEP)'),
+                    _sectionLabel('RENDIMIENTO (ÍNDICE VS. HATO, APROX.)'),
                     const SizedBox(height: 8),
-                    _depRow(depWeaning, animal.weaningWeight),
+                    _depRow(depWeaning),
                     const SizedBox(height: 8),
                     _buildStatRow(
                         'Ganancia Diaria (GDP):',
-                        gdp > 0
-                            ? '${(gdp * 1000).toStringAsFixed(0)} gr/día'
-                            : 'Faltan datos'),
+                        gdp == null
+                            ? 'Faltan datos'
+                            : '${gdp.gramsPerDay.toStringAsFixed(0)} gr/día'
+                                '${gdp.usedRealWeaningDate ? '' : ' (est. 205d)'}'),
                     const SizedBox(height: 8),
                     _buildStatRow(rasgoPartoLabel, rasgoPartoValor),
                     const SizedBox(height: 12),
@@ -436,33 +496,49 @@ class _GeneticaScreenState extends State<GeneticaScreen>
     );
   }
 
-  Widget _depRow(double dep, double? weaningWeight) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _depRow((double dep, bool isContemporary)? result) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('DEP Destete:',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-        Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-              color: weaningWeight == null
-                  ? Colors.grey.shade200
-                  : (dep >= 0 ? Colors.green.shade50 : Colors.red.shade50),
-              borderRadius: BorderRadius.circular(5)),
-          child: Text(
-            weaningWeight == null
-                ? 'Sin datos'
-                : '${dep >= 0 ? '+' : ''}${dep.toStringAsFixed(1)} kg',
-            style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: weaningWeight == null
-                    ? Colors.grey
-                    : (dep >= 0
-                        ? Colors.green.shade700
-                        : Colors.red.shade700)),
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Peso Destete vs. Hato:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                  color: result == null
+                      ? Colors.grey.shade200
+                      : (result.$1 >= 0
+                          ? Colors.green.shade50
+                          : Colors.red.shade50),
+                  borderRadius: BorderRadius.circular(5)),
+              child: Text(
+                result == null
+                    ? 'Sin datos'
+                    : '${result.$1 >= 0 ? '+' : ''}${result.$1.toStringAsFixed(1)} kg',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: result == null
+                        ? Colors.grey
+                        : (result.$1 >= 0
+                            ? Colors.green.shade700
+                            : Colors.red.shade700)),
+              ),
+            ),
+          ],
         ),
+        if (result != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              result.$2
+                  ? 'vs. contemporáneos (misma raza/sexo/año de nacimiento)'
+                  : 'vs. promedio general del hato (pocos contemporáneos reales)',
+              style: const TextStyle(fontSize: 10, color: Colors.grey),
+            ),
+          ),
       ],
     );
   }
@@ -470,8 +546,13 @@ class _GeneticaScreenState extends State<GeneticaScreen>
   // ═══════════════════════════════════════════════════════════════════════════
   // TAB 2: SIMULADOR DE CRUZAS
   // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildSimulatorTab(List<Animal> females, List<Animal> males,
-      double herdAvgWeaning, double herdAvgBirth) {
+  Widget _buildSimulatorTab(
+      List<Animal> females,
+      List<Animal> males,
+      double herdAvgWeaning,
+      double herdAvgBirth,
+      List<Animal> allAnimals,
+      Map<String, Animal> byEarTag) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -484,7 +565,9 @@ class _GeneticaScreenState extends State<GeneticaScreen>
                   color: Color(0xFF5e3a1c))),
           const SizedBox(height: 5),
           const Text(
-              'Selecciona dos animales. El motor calculará la genética del futuro becerro.',
+              'Selecciona dos animales. Se proyecta un estimado de peso y el '
+              'riesgo de consanguinidad de la cría, basado en los datos ya '
+              'registrados — no es un valor genómico certificado.',
               style: TextStyle(fontSize: 13, color: Colors.grey)),
           const SizedBox(height: 20),
           DropdownButtonFormField<Animal>(
@@ -546,34 +629,59 @@ class _GeneticaScreenState extends State<GeneticaScreen>
           if (_showSimulation &&
               _selectedMother != null &&
               _selectedFather != null)
-            _buildSimulationResult(herdAvgWeaning, herdAvgBirth),
+            _buildSimulationResult(
+                herdAvgWeaning, herdAvgBirth, allAnimals, byEarTag),
         ],
       ),
     );
   }
 
-  Widget _buildSimulationResult(
-      double herdAvgWeaning, double herdAvgBirth) {
-    final inbreedingAlert =
-        _checkInbreeding(_selectedMother!, _selectedFather!);
+  Widget _buildSimulationResult(double herdAvgWeaning, double herdAvgBirth,
+      List<Animal> allAnimals, Map<String, Animal> byEarTag) {
+    final mother = _selectedMother!;
+    final father = _selectedFather!;
+    final inbreeding = _checkInbreeding(mother, father, byEarTag);
+    final bannerColor = _riskColor(inbreeding.risk);
+    final completenessPct =
+        (inbreeding.pedigreeCompleteness * 100).toStringAsFixed(0);
+    final bannerText = inbreeding.risk == InbreedingRisk.none
+        ? 'Sin relación detectada en la genealogía disponible '
+            '($completenessPct% de 3 generaciones verificada).'
+        : 'Riesgo de consanguinidad ${inbreeding.riskLabel} — '
+            'F ≈ ${(inbreeding.coefficient * 100).toStringAsFixed(1)}% '
+            '($completenessPct% de 3 generaciones verificada).';
 
-    final mBW = _selectedMother!.birthWeight ?? herdAvgBirth;
-    final fBW = _selectedFather!.birthWeight ?? herdAvgBirth;
+    final mBW = mother.birthWeight ?? herdAvgBirth;
+    final fBW = father.birthWeight ?? herdAvgBirth;
     final predictedBirthWeight = (mBW + fBW) / 2;
 
-    final mWW = _selectedMother!.weaningWeight ?? herdAvgWeaning;
-    final fWW = _selectedFather!.weaningWeight ?? herdAvgWeaning;
-    final predictedWeaningWeight = (mWW + fWW) / 2;
+    final mWW = mother.weaningWeight ?? herdAvgWeaning;
+    final fWW = father.weaningWeight ?? herdAvgWeaning;
+    final baseWeaningWeight = (mWW + fWW) / 2;
+    // Heterosis (vigor híbrido): una cruza entre grupos raciales distintos
+    // suele destetar más pesado que el simple promedio de los padres. Se
+    // aplica un bono conservador (+8%) solo al peso al destete, documentado
+    // en la literatura para cruzas industria-cebú/continental — nunca al
+    // peso al nacer, que depende más del tamaño de la madre.
+    final motherGroup = breedGroupOf(mother.breed);
+    final fatherGroup = breedGroupOf(father.breed);
+    final isCrossbred = motherGroup != fatherGroup;
+    final predictedWeaningWeight =
+        isCrossbred ? baseWeaningWeight * 1.08 : baseWeaningWeight;
 
     final predictedDEP = predictedWeaningWeight - herdAvgWeaning;
 
-    // Predicción GDP (nacimiento → destete en 205 días)
+    // Predicción GDP (nacimiento → destete en 205 días estándar — es una
+    // proyección, no hay fecha real que usar todavía).
     final predictedGDP =
         (predictedWeaningWeight - predictedBirthWeight) / 205;
 
+    final dystociaAlert = _checkDystociaRisk(
+        mother, predictedBirthWeight, allAnimals, herdAvgBirth);
+
     // Herencia de marcadores y resistencia
-    final motherResist = _selectedMother!.diseaseResistance ?? '';
-    final fatherResist = _selectedFather!.diseaseResistance ?? '';
+    final motherResist = mother.diseaseResistance ?? '';
+    final fatherResist = father.diseaseResistance ?? '';
     final sharedResist = motherResist.isNotEmpty && fatherResist.isNotEmpty
         ? 'Madre: $motherResist\nPadre: $fatherResist'
         : (motherResist.isNotEmpty
@@ -584,10 +692,7 @@ class _GeneticaScreenState extends State<GeneticaScreen>
       elevation: 5,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(15),
-          side: BorderSide(
-              color:
-                  inbreedingAlert != null ? Colors.red : Colors.green,
-              width: 2)),
+          side: BorderSide(color: bannerColor, width: 2)),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -596,20 +701,30 @@ class _GeneticaScreenState extends State<GeneticaScreen>
                 style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: inbreedingAlert != null
-                        ? Colors.red
-                        : Colors.green)),
+                    color: bannerColor)),
             const Divider(thickness: 2),
             const SizedBox(height: 10),
-            if (inbreedingAlert != null)
-              _alertBanner(inbreedingAlert, Colors.red, Colors.red.shade50,
-                  Icons.warning_amber_rounded)
-            else
+            _alertBanner(
+                bannerText,
+                bannerColor,
+                bannerColor.withValues(alpha: 0.08),
+                inbreeding.risk == InbreedingRisk.none
+                    ? Icons.check_circle
+                    : Icons.warning_amber_rounded),
+            if (isCrossbred) ...[
+              const SizedBox(height: 6),
               _alertBanner(
-                  'Cruza Segura: Baja probabilidad de consanguinidad.',
-                  Colors.green,
-                  Colors.green.shade50,
-                  Icons.check_circle),
+                  'Cruza entre grupos raciales distintos: se aplicó un bono '
+                  'de heterosis (+8%) al peso al destete estimado.',
+                  Colors.blue,
+                  Colors.blue.shade50,
+                  Icons.science),
+            ],
+            if (dystociaAlert != null) ...[
+              const SizedBox(height: 6),
+              _alertBanner(dystociaAlert, Colors.deepOrange,
+                  Colors.orange.shade50, Icons.priority_high),
+            ],
             const SizedBox(height: 10),
             _buildStatRow(
                 'Peso al Nacer Estimado:',
@@ -629,11 +744,11 @@ class _GeneticaScreenState extends State<GeneticaScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('DEP Proyectado:',
+                const Text('Índice Proyectado vs. Hato:',
                     style: TextStyle(
                         fontSize: 14, fontWeight: FontWeight.bold)),
                 Text(
-                  '${predictedDEP >= 0 ? '+' : ''}${predictedDEP.toStringAsFixed(1)} kg vs Hato',
+                  '${predictedDEP >= 0 ? '+' : ''}${predictedDEP.toStringAsFixed(1)} kg',
                   style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: predictedDEP >= 0
@@ -668,19 +783,19 @@ class _GeneticaScreenState extends State<GeneticaScreen>
   // ═══════════════════════════════════════════════════════════════════════════
   // TAB 3: RANKING DE MEJORES REPRODUCTORES
   // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildRankingTab(List<Animal> animals, double herdAvgWeaning) {
-    // Separar y ordenar machos y hembras por DEP descendente
+  Widget _buildRankingTab(List<Animal> animals, ContemporaryGroups groups) {
+    // Separar y ordenar machos y hembras por índice vs. hato descendente
+    double depValueOf(Animal a) => _calcDEP(a, groups)?.$1 ?? 0;
+
     final males = animals
-        .where((a) => a.sex == 'Macho' && a.weaningWeight != null)
+        .where((a) => _isMale(a.sex) && a.weaningWeight != null)
         .toList()
-      ..sort((a, b) =>
-          _calcDEP(b, herdAvgWeaning).compareTo(_calcDEP(a, herdAvgWeaning)));
+      ..sort((a, b) => depValueOf(b).compareTo(depValueOf(a)));
 
     final females = animals
-        .where((a) => a.sex == 'Hembra' && a.weaningWeight != null)
+        .where((a) => _isFemale(a.sex) && a.weaningWeight != null)
         .toList()
-      ..sort((a, b) =>
-          _calcDEP(b, herdAvgWeaning).compareTo(_calcDEP(a, herdAvgWeaning)));
+      ..sort((a, b) => depValueOf(b).compareTo(depValueOf(a)));
 
     final noData = animals
         .where((a) => a.weaningWeight == null)
@@ -704,8 +819,11 @@ class _GeneticaScreenState extends State<GeneticaScreen>
               SizedBox(width: 8),
               Expanded(
                   child: Text(
-                      'Ranking basado en DEP al Destete. El animal con mayor DEP positivo '
-                      'transmite más kilos extra a su progenie vs el promedio del hato.',
+                      'Ranking basado en el índice de peso al destete vs. hato '
+                      '(aproximado — compara contra contemporáneos de la misma '
+                      'raza/sexo/año cuando hay suficientes, o contra el promedio '
+                      'general si no). El animal con mayor índice positivo transmite '
+                      'más kilos extra a su progenie.',
                       style: TextStyle(fontSize: 12, color: Color(0xFF5e3a1c)))),
             ]),
           ),
@@ -714,16 +832,16 @@ class _GeneticaScreenState extends State<GeneticaScreen>
           if (males.isNotEmpty) ...[
             _rankSectionTitle('Sementales (Machos)', Colors.blue),
             const SizedBox(height: 10),
-            ...males.asMap().entries.map((e) =>
-                _rankCard(e.key + 1, e.value, herdAvgWeaning, Colors.blue)),
+            ...males.asMap().entries.map(
+                (e) => _rankCard(e.key + 1, e.value, groups, Colors.blue)),
             const SizedBox(height: 20),
           ],
 
           if (females.isNotEmpty) ...[
             _rankSectionTitle('Vientres (Hembras)', Colors.pink),
             const SizedBox(height: 10),
-            ...females.asMap().entries.map((e) =>
-                _rankCard(e.key + 1, e.value, herdAvgWeaning, Colors.pink)),
+            ...females.asMap().entries.map(
+                (e) => _rankCard(e.key + 1, e.value, groups, Colors.pink)),
             const SizedBox(height: 20),
           ],
 
@@ -767,9 +885,10 @@ class _GeneticaScreenState extends State<GeneticaScreen>
   }
 
   Widget _rankCard(
-      int rank, Animal animal, double herdAvgWeaning, Color color) {
-    final dep = _calcDEP(animal, herdAvgWeaning);
-    final gdp = _calcGDP(animal);
+      int rank, Animal animal, ContemporaryGroups groups, Color color) {
+    final depResult = _calcDEP(animal, groups);
+    final dep = depResult?.$1 ?? 0;
+    final gdp = calculateWeaningGdp(animal);
     final stars = _calculateMeatStars(animal);
     final isTop = rank <= 3;
     final medalColors = [Colors.amber, Colors.grey.shade400, Colors.brown.shade300];
@@ -820,16 +939,20 @@ class _GeneticaScreenState extends State<GeneticaScreen>
                       overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
                   Text(
-                      '${animal.breed ?? 'Sin raza'}  ·  ${gdp > 0 ? '${(gdp * 1000).toStringAsFixed(0)} gr/día' : 'Sin GDP'}',
+                      '${animal.breed ?? 'Sin raza'}  ·  ${gdp != null ? '${gdp.gramsPerDay.toStringAsFixed(0)} gr/día' : 'Sin GDP'}',
                       style:
                           const TextStyle(color: Colors.grey, fontSize: 11)),
                   const SizedBox(height: 4),
-                  Row(children: List.generate(
-                      5,
-                      (i) => Icon(
-                          i < stars ? Icons.star : Icons.star_border,
-                          color: Colors.amber,
-                          size: 13))),
+                  if (stars == null)
+                    const Text('No aplica (propósito Leche)',
+                        style: TextStyle(fontSize: 10, color: Colors.grey))
+                  else
+                    Row(children: List.generate(
+                        5,
+                        (i) => Icon(
+                            i < stars ? Icons.star : Icons.star_border,
+                            color: Colors.amber,
+                            size: 13))),
                 ],
               ),
             ),
@@ -847,7 +970,7 @@ class _GeneticaScreenState extends State<GeneticaScreen>
                           : Colors.red.shade50,
                       borderRadius: BorderRadius.circular(8)),
                   child: Text(
-                    'DEP ${dep >= 0 ? '+' : ''}${dep.toStringAsFixed(1)} kg',
+                    '${dep >= 0 ? '+' : ''}${dep.toStringAsFixed(1)} kg',
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
