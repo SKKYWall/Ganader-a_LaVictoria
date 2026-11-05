@@ -61,6 +61,13 @@ class Animal {
   final String? purpose;
   final DateTime? withdrawalDate; // Fecha de retiro por medicamentos
 
+  // Ciclo de vida del animal. 'activo' si no se ha dado de baja.
+  final String status; // 'activo' | 'inactivo'
+  final String? exitReason; // 'vendido' | 'sacrificado' | 'muerto'
+  final DateTime? exitDate;
+  final double? exitPrice;
+  final String? exitNotes;
+
   Animal({
     required this.id,
     required this.name,
@@ -89,6 +96,11 @@ class Animal {
     this.pregnancyDate, // Añadido al constructor
     this.withdrawalDate,
     this.purpose,
+    this.status = 'activo',
+    this.exitReason,
+    this.exitDate,
+    this.exitPrice,
+    this.exitNotes,
   });
 
   factory Animal.fromFirestore(Map<String, dynamic> data, String id) {
@@ -178,6 +190,16 @@ class Animal {
       withdrawalDate: data['withdrawalDate'] != null
           ? (data['withdrawalDate'] as Timestamp).toDate()
           : null,
+
+      // Ciclo de vida: los animales existentes sin este campo se tratan
+      // como 'activo' para no romper datos ya guardados.
+      status: data['status'] as String? ?? 'activo',
+      exitReason: data['exitReason'] as String?,
+      exitDate: data['exitDate'] is Timestamp
+          ? (data['exitDate'] as Timestamp).toDate()
+          : null,
+      exitPrice: (data['exitPrice'] as num?)?.toDouble(),
+      exitNotes: data['exitNotes'] as String?,
     );
   }
 
@@ -217,6 +239,12 @@ class Animal {
 
       if (withdrawalDate != null)
         'withdrawalDate': Timestamp.fromDate(withdrawalDate!),
+
+      'status': status,
+      if (exitReason != null) 'exitReason': exitReason,
+      if (exitDate != null) 'exitDate': Timestamp.fromDate(exitDate!),
+      if (exitPrice != null) 'exitPrice': exitPrice,
+      if (exitNotes != null) 'exitNotes': exitNotes,
     };
   }
 }

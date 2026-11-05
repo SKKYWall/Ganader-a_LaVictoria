@@ -10,6 +10,7 @@ class Transaction {
   final String? subCategory; // Opcional, para egresos más detallados
   final String? notes; // Observaciones
   final DateTime date;
+  final String? animalId; // Opcional: liga la transacción a un animal específico
 
   Transaction({
     required this.id,
@@ -19,6 +20,7 @@ class Transaction {
     this.subCategory,
     this.notes,
     required this.date,
+    this.animalId,
   });
 
   // Factory constructor para crear una instancia de Transaction desde Firestore
@@ -31,6 +33,7 @@ class Transaction {
       subCategory: data['subCategory'] as String?,
       notes: data['notes'] as String?,
       date: (data['date'] as Timestamp).toDate(),
+      animalId: data['animalId'] as String?,
     );
   }
 
@@ -43,6 +46,7 @@ class Transaction {
       'subCategory': subCategory,
       'notes': notes,
       'date': Timestamp.fromDate(date),
+      if (animalId != null) 'animalId': animalId,
     };
   }
 }
