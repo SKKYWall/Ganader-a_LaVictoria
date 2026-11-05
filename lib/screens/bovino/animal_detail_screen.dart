@@ -10,6 +10,7 @@ import 'package:manual_ganadero_flutter/screens/bovino/edit_animal_screen.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/register_animal_screen.dart';
 import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 import 'package:manual_ganadero_flutter/widgets/animal_exit_dialog.dart';
+import 'package:manual_ganadero_flutter/core/withdrawal_utils.dart';
 
 class AnimalDetailScreen extends StatefulWidget {
   final String animalId; // Recibimos el ID del animal
@@ -234,10 +235,9 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
   Widget _buildWithdrawalBanner() {
     final wd = _animal?.withdrawalDate;
     if (wd == null) return const SizedBox.shrink();
-    final now = DateTime.now();
-    if (!wd.isAfter(now)) return const SizedBox.shrink();
+    if (!isInWithdrawal(wd)) return const SizedBox.shrink();
 
-    final days = wd.difference(now).inDays + 1;
+    final days = daysUntilRelease(wd);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 16),

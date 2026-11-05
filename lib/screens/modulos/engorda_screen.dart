@@ -5,6 +5,8 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
 import 'package:manual_ganadero_flutter/models/animal_stat.dart';
+import 'package:manual_ganadero_flutter/core/carcass_yield.dart';
+import 'package:manual_ganadero_flutter/services/animal_lifecycle_service.dart';
 
 class EngordaScreen extends StatefulWidget {
   const EngordaScreen({super.key});
@@ -19,8 +21,6 @@ class _EngordaScreenState extends State<EngordaScreen> {
 
   String? _currentRanchId;
   bool _isLoadingRanch = true;
-
-  final double estimacionCanal = 0.58;
 
   @override
   void initState() {
@@ -69,18 +69,20 @@ class _EngordaScreenState extends State<EngordaScreen> {
     return animal.birthWeight ?? 0.0;
   }
 
-  double _calcularGDP(Animal animal) {
+  // Null = no hay suficientes datos para calcular la GDP (no confundir con
+  // una GDP real de 0 o negativa, que sí debe mostrarse como alerta).
+  double? _calcularGDP(Animal animal) {
     List<AnimalStat> weightStats = animal.stats
         .where((s) => s.label == 'Peso' || s.label.startsWith('Peso '))
         .toList();
-    if (weightStats.length < 2) return 0.0;
+    if (weightStats.length < 2) return null;
 
     weightStats.sort((a, b) => a.date.compareTo(b.date));
     AnimalStat first = weightStats.first;
     AnimalStat last = weightStats.last;
 
     int days = last.date.difference(first.date).inDays;
-    if (days == 0) return 0.0;
+    if (days == 0) return null;
 
     return (last.value - first.value) / days;
   }
@@ -215,8 +217,9 @@ class _EngordaScreenState extends State<EngordaScreen> {
             ));
   }
 
-  // --- FUNCIÓN: ELIMINAR Y MANDAR AL RASTRO ---
-  void _confirmarEnvioRastro(Animal animal, String pesoVivo, String pesoCanal) {
+  // --- FUNCIÓN: PROCESAR Y MANDAR AL RASTRO (sin borrar el historial) ---
+  void _confirmarEnvioRastro(
+      Animal animal, double pesoVivo, double pesoCanal, double? precioVenta) {
     showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -231,7 +234,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
                 ],
               ),
               content: Text(
-                  'Al confirmar el envío al rastro, ${animal.name} pasará al historial de rastro y saldrá del inventario vivo.\n\n¿Estás seguro?',
+                  'Al confirmar el envío al rastro, ${animal.name} pasará al historial de rastro y se dará de baja del inventario vivo (su historial se conserva).\n\n¿Estás seguro?',
                   style: const TextStyle(fontSize: 15)),
               actions: [
                 TextButton(
@@ -257,7 +260,9 @@ class _EngordaScreenState extends State<EngordaScreen> {
                           .collection('ranches')
                           .doc(_currentRanchId);
 
-                      // Guardar registro histórico antes de eliminar
+                      // Guardar registro histórico (incluye el % de
+                      // rendimiento real para calibrar carcass_yield.dart a
+                      // futuro con datos propios del rastro).
                       await ranchRef
                           .collection('slaughter_records')
                           .doc(animal.id)
@@ -268,8 +273,12 @@ class _EngordaScreenState extends State<EngordaScreen> {
                         'breed': animal.breed,
                         'sex': animal.sex,
                         'birthWeight': animal.birthWeight,
-                        'pesoVivoFinal': double.tryParse(pesoVivo) ?? 0,
-                        'pesoCanal': double.tryParse(pesoCanal) ?? 0,
+                        'pesoVivoFinal': pesoVivo,
+                        'pesoCanal': pesoCanal,
+                        'rendimientoReal': pesoVivo > 0
+                            ? pesoCanal / pesoVivo
+                            : null,
+                        'precioVenta': precioVenta,
                         'slaughterDate': Timestamp.now(),
                         'stats': animal.stats
                             .map((s) => {
@@ -280,11 +289,18 @@ class _EngordaScreenState extends State<EngordaScreen> {
                             .toList(),
                       });
 
-                      // Eliminar del inventario vivo
-                      await ranchRef
-                          .collection('animals')
-                          .doc(animal.id)
-                          .delete();
+                      // Dar de baja sin borrar — conserva el historial y
+                      // las ligas de padre/madre, y registra el ingreso en
+                      // Finanzas si se dio un precio de venta.
+                      await AnimalLifecycleService.recordExit(
+                        animal: animal,
+                        userId: _currentUser!.uid,
+                        ranchId: _currentRanchId!,
+                        reason: 'sacrificado',
+                        date: DateTime.now(),
+                        price: precioVenta,
+                        notes: 'Envío a rastro — ${pesoCanal.toStringAsFixed(1)} kg en canal',
+                      );
 
                       if (mounted) Navigator.pop(context);
                       if (mounted) {
@@ -312,107 +328,155 @@ class _EngordaScreenState extends State<EngordaScreen> {
             ? _getUltimoPeso(animal).toString()
             : '');
     final pesoCanalController = TextEditingController();
+    final precioVentaController = TextEditingController();
+    String? errorText;
 
     showModalBottomSheet(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
         builder: (ctx) {
-          return Container(
-            decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(25),
-                    topRight: Radius.circular(25))),
-            padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-                left: 20,
-                right: 20,
-                top: 25),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                              color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(10)),
-                          child: const Icon(FontAwesomeIcons.truckFast,
-                              color: Colors.redAccent)),
-                      const SizedBox(width: 15),
-                      const Expanded(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                            Text('Enviar al Rastro',
-                                style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF5e3a1c))),
-                            Text('Procesar animal y sacarlo del inventario',
-                                style:
-                                    TextStyle(fontSize: 13, color: Colors.grey))
-                          ])),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                      controller: pesoVivoController,
-                      maxLength: 10,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                          labelText: 'Peso vivo final (kg)',
-                          prefixIcon: const Icon(Icons.monitor_weight_outlined,
-                              color: Colors.grey),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10)))),
-                  const SizedBox(height: 15),
-                  TextFormField(
-                      controller: pesoCanalController,
-                      maxLength: 10,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                          labelText: 'Peso en Canal (Limpio en kg)',
-                          helperText:
-                              '* El peso exacto ya sin vísceras ni piel.',
-                          helperStyle: const TextStyle(
-                              color: Color(0xFFc99450),
-                              fontStyle: FontStyle.italic),
-                          prefixIcon:
-                              const Icon(Icons.set_meal, color: Colors.grey),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10)))),
-                  const SizedBox(height: 25),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.redAccent,
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10))),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _confirmarEnvioRastro(animal, pesoVivoController.text,
-                            pesoCanalController.text);
-                      },
-                      child: const Text('Confirmar Venta y Eliminar',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
+          return StatefulBuilder(builder: (context, setStateModal) {
+            return Container(
+              decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(25),
+                      topRight: Radius.circular(25))),
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                  left: 20,
+                  right: 20,
+                  top: 25),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(10)),
+                            child: const Icon(FontAwesomeIcons.truckFast,
+                                color: Colors.redAccent)),
+                        const SizedBox(width: 15),
+                        const Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text('Enviar al Rastro',
+                                  style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF5e3a1c))),
+                              Text('Procesar animal y darlo de baja del inventario',
+                                  style: TextStyle(
+                                      fontSize: 13, color: Colors.grey))
+                            ])),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                ],
+                    const SizedBox(height: 20),
+                    TextFormField(
+                        controller: pesoVivoController,
+                        maxLength: 10,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                            labelText: 'Peso vivo final (kg)',
+                            prefixIcon: const Icon(
+                                Icons.monitor_weight_outlined,
+                                color: Colors.grey),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10)))),
+                    const SizedBox(height: 15),
+                    TextFormField(
+                        controller: pesoCanalController,
+                        maxLength: 10,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                            labelText: 'Peso en Canal (Limpio en kg)',
+                            helperText:
+                                '* El peso exacto ya sin vísceras ni piel.',
+                            helperStyle: const TextStyle(
+                                color: Color(0xFFc99450),
+                                fontStyle: FontStyle.italic),
+                            prefixIcon:
+                                const Icon(Icons.set_meal, color: Colors.grey),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10)))),
+                    const SizedBox(height: 15),
+                    TextFormField(
+                        controller: precioVentaController,
+                        maxLength: 10,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                            labelText: 'Precio de venta (Opcional)',
+                            helperText:
+                                '* Si lo indicas, se registra como ingreso en Finanzas.',
+                            helperStyle: const TextStyle(
+                                color: Color(0xFFc99450),
+                                fontStyle: FontStyle.italic),
+                            prefixIcon: const Icon(Icons.attach_money,
+                                color: Colors.grey),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10)))),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 10),
+                      Text(errorText!,
+                          style: const TextStyle(
+                              color: Colors.red, fontSize: 13)),
+                    ],
+                    const SizedBox(height: 25),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.redAccent,
+                            padding: const EdgeInsets.symmetric(vertical: 15),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10))),
+                        onPressed: () {
+                          final pesoVivo =
+                              double.tryParse(pesoVivoController.text.trim());
+                          final pesoCanal = double.tryParse(
+                              pesoCanalController.text.trim());
+                          if (pesoVivo == null || pesoVivo <= 0) {
+                            setStateModal(() => errorText =
+                                'Ingresa un peso vivo final válido (mayor a 0).');
+                            return;
+                          }
+                          if (pesoCanal == null || pesoCanal <= 0) {
+                            setStateModal(() => errorText =
+                                'Ingresa un peso en canal válido (mayor a 0).');
+                            return;
+                          }
+                          final precioVenta = precioVentaController.text
+                                  .trim()
+                                  .isNotEmpty
+                              ? double.tryParse(
+                                  precioVentaController.text.trim())
+                              : null;
+                          Navigator.pop(ctx);
+                          _confirmarEnvioRastro(
+                              animal, pesoVivo, pesoCanal, precioVenta);
+                        },
+                        child: const Text('Confirmar y Dar de Baja',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
               ),
-            ),
-          );
+            );
+          });
         });
   }
 
@@ -651,7 +715,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
         double pesoMeta = (data['targetWeight'] as num?)?.toDouble() ?? 500.0;
 
         double ultimoPeso = _getUltimoPeso(animal);
-        double gdp = _calcularGDP(animal);
+        double? gdp = _calcularGDP(animal);
         double progreso =
             pesoMeta > 0 ? (ultimoPeso / pesoMeta).clamp(0.0, 1.0) : 0.0;
         bool llegoMeta = ultimoPeso >= pesoMeta && pesoMeta > 0;
@@ -677,8 +741,16 @@ class _EngordaScreenState extends State<EngordaScreen> {
                   title: Text('${animal.name} (${animal.earTagNumber})',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 16)),
-                  subtitle: Text(
-                      'Ganancia Diaria: ${gdp > 0 ? '${(gdp * 1000).toStringAsFixed(0)} gr' : 'Faltan datos'}'),
+                  subtitle: gdp == null
+                      ? const Text('Ganancia Diaria: Faltan datos')
+                      : Text(
+                          'Ganancia Diaria: ${(gdp * 1000).toStringAsFixed(0)} gr',
+                          style: TextStyle(
+                            color: gdp < 0 ? Colors.red : null,
+                            fontWeight:
+                                gdp < 0 ? FontWeight.bold : null,
+                          ),
+                        ),
                   trailing: IconButton(
                       icon:
                           const Icon(Icons.remove_red_eye, color: Colors.grey),
@@ -797,10 +869,13 @@ class _EngordaScreenState extends State<EngordaScreen> {
     }
 
     double pesoVivoTotal = 0;
+    double carneEstimada = 0;
     for (var index in indexes) {
-      pesoVivoTotal += _getUltimoPeso(allAnimals[index]);
+      final a = allAnimals[index];
+      final peso = _getUltimoPeso(a);
+      pesoVivoTotal += peso;
+      carneEstimada += peso * carcassYieldFor(a.breed, a.sex);
     }
-    double carneEstimada = pesoVivoTotal * estimacionCanal;
 
     return CustomScrollView(
       slivers: [
@@ -851,7 +926,8 @@ class _EngordaScreenState extends State<EngordaScreen> {
               (context, i) {
                 Animal animal = allAnimals[indexes[i]];
                 double pesoVivo = _getUltimoPeso(animal);
-                double canalEst = pesoVivo * estimacionCanal;
+                double rendimiento = carcassYieldFor(animal.breed, animal.sex);
+                double canalEst = pesoVivo * rendimiento;
 
                 return Card(
                   elevation: 2,
@@ -906,8 +982,9 @@ class _EngordaScreenState extends State<EngordaScreen> {
                               Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
-                                    const Text('Rendimiento Esperado (58%)',
-                                        style: TextStyle(
+                                    Text(
+                                        'Rendimiento Esperado (${(rendimiento * 100).toStringAsFixed(0)}%)',
+                                        style: const TextStyle(
                                             fontSize: 11, color: Colors.grey)),
                                     Text(
                                         '${canalEst.toStringAsFixed(1)} kg de carne',

@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
+import 'package:manual_ganadero_flutter/core/medication_catalog.dart';
+import 'package:manual_ganadero_flutter/core/withdrawal_utils.dart';
 
 class SanidadScreen extends StatefulWidget {
   const SanidadScreen({super.key});
@@ -25,6 +27,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
   // Variables para Recordatorio
   bool _scheduleReminder = false;
   final TextEditingController _monthsController = TextEditingController();
+  bool _confirmNoWithdrawal = false;
 
   String _selectedType = 'Vacuna';
   final List<String> _medTypes = [
@@ -96,6 +99,9 @@ class _SanidadScreenState extends State<SanidadScreen> {
     // Reiniciamos las variables cada vez que se abre el diálogo
     _scheduleReminder = false;
     _monthsController.clear();
+    _confirmNoWithdrawal = false;
+    final int withdrawalDays =
+        int.tryParse(_withdrawalDaysController.text.trim()) ?? 0;
 
     bool? confirm = await showDialog<bool>(
         context: context,
@@ -112,6 +118,22 @@ class _SanidadScreenState extends State<SanidadScreen> {
                   children: [
                     Text(
                         'Se aplicará $_selectedType: "${_medNameController.text.trim()}" a ${_selectedAnimals.length} animales.'),
+                    if (withdrawalDays == 0) ...[
+                      const SizedBox(height: 10),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text(
+                            'Confirmo que este tratamiento no requiere periodo de retiro para carne o leche',
+                            style: TextStyle(
+                                fontSize: 13, color: Colors.orange)),
+                        value: _confirmNoWithdrawal,
+                        activeColor: Colors.orange,
+                        onChanged: (val) {
+                          setStateDialog(
+                              () => _confirmNoWithdrawal = val ?? false);
+                        },
+                      ),
+                    ],
                     const SizedBox(height: 15),
                     const Divider(),
                     const SizedBox(height: 5),
@@ -163,6 +185,13 @@ class _SanidadScreenState extends State<SanidadScreen> {
                         _monthsController.text.trim().isEmpty) {
                       ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
                           content: Text('Ingresa la cantidad de meses'),
+                          backgroundColor: Colors.red));
+                      return;
+                    }
+                    if (withdrawalDays == 0 && !_confirmNoWithdrawal) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                          content: Text(
+                              'Confirma que no hay periodo de retiro, o ingresa los días correspondientes'),
                           backgroundColor: Colors.red));
                       return;
                     }
@@ -243,7 +272,20 @@ class _SanidadScreenState extends State<SanidadScreen> {
         };
 
         if (releaseDate != null) {
-          updateData['withdrawalDate'] = Timestamp.fromDate(releaseDate);
+          // No sobrescribir una cuarentena más larga ya en curso (p. ej. un
+          // desparasitante de 45 días vigente no debe acortarse a 6 días
+          // porque se aplicó después una penicilina de acción corta).
+          DateTime finalReleaseDate = releaseDate;
+          final currentSnap = await animalRef.get();
+          final currentWithdrawal =
+              (currentSnap.data() as Map<String, dynamic>?)?['withdrawalDate'];
+          if (currentWithdrawal is Timestamp) {
+            final currentDate = currentWithdrawal.toDate();
+            if (currentDate.isAfter(finalReleaseDate)) {
+              finalReleaseDate = currentDate;
+            }
+          }
+          updateData['withdrawalDate'] = Timestamp.fromDate(finalReleaseDate);
         }
 
         batch.update(animalRef, updateData);
@@ -267,6 +309,51 @@ class _SanidadScreenState extends State<SanidadScreen> {
     } finally {
       if (mounted) setState(() => _isApplying = false);
     }
+  }
+
+  // Chips de referencia para precargar los días de retiro sugeridos del
+  // catálogo (editable, nunca autoridad — ver medication_catalog.dart).
+  Widget _buildMedicationSuggestions() {
+    final suggestions = medicationCatalog[_selectedType];
+    if (suggestions == null || suggestions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 10.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Sugerencias de referencia (días en carne):',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: suggestions.map((ref) {
+              return ActionChip(
+                label: Text(
+                    '${ref.name}: ${ref.suggestedWithdrawalDaysMeat}d',
+                    style: const TextStyle(fontSize: 11)),
+                backgroundColor: Colors.orange.shade50,
+                onPressed: () {
+                  setState(() {
+                    _withdrawalDaysController.text =
+                        ref.suggestedWithdrawalDaysMeat.toString();
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(ref.note),
+                      backgroundColor: Colors.orange,
+                      duration: const Duration(seconds: 4)));
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 6),
+          const Text(medicationCatalogDisclaimer,
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
+        ],
+      ),
+    );
   }
 
   void _showSnackBar(String msg, Color color) {
@@ -346,7 +433,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
                   data['withdrawalDate'] != null) {
                 DateTime releaseDate =
                     (data['withdrawalDate'] as Timestamp).toDate();
-                if (releaseDate.isAfter(DateTime.now())) {
+                if (isInWithdrawal(releaseDate)) {
                   quarantinedDocs.add(doc);
                 } else {
                   availableDocs.add(doc);
@@ -471,6 +558,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
                             contentPadding:
                                 const EdgeInsets.symmetric(horizontal: 10)),
                       ),
+                      _buildMedicationSuggestions(),
                     ],
                   ),
                 ),
@@ -611,7 +699,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
         final doc = quarantinedDocs[index];
         final data = doc.data() as Map<String, dynamic>;
         DateTime releaseDate = (data['withdrawalDate'] as Timestamp).toDate();
-        int daysLeft = releaseDate.difference(DateTime.now()).inDays + 1;
+        int daysLeft = daysUntilRelease(releaseDate);
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12.0),

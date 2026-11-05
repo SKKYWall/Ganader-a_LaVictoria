@@ -314,8 +314,13 @@ class _LecheScreenState extends State<LecheScreen> {
               if (milkedToday) cowsMilkedToday++;
             }
 
-            double averagePerCow = cowsMilkedToday > 0
-                ? (totalLitersToday / cowsMilkedToday)
+            // Se divide entre el total de vacas en ordeña (no solo las que
+            // ya se registraron hoy) para que el promedio refleje el hato
+            // completo — si solo se ordeñaron 2 de 10 vacas, el promedio
+            // real por cabeza es mucho menor de lo que mostraría dividir
+            // solo entre las 2 ya registradas.
+            double averagePerCow = lactatingCows.isNotEmpty
+                ? (totalLitersToday / lactatingCows.length)
                 : 0.0;
 
             return Column(
@@ -335,17 +340,29 @@ class _LecheScreenState extends State<LecheScreen> {
                           offset: const Offset(0, 5))
                     ],
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  child: Column(
                     children: [
-                      _buildSummaryStat('Litros Hoy',
-                          '${totalLitersToday.toStringAsFixed(1)} L'),
-                      Container(width: 1, height: 40, color: Colors.white54),
-                      _buildSummaryStat(
-                          'En Ordeña', lactatingCows.length.toString()),
-                      Container(width: 1, height: 40, color: Colors.white54),
-                      _buildSummaryStat('Promedio',
-                          '${averagePerCow.toStringAsFixed(1)} L/vaca'),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildSummaryStat('Litros Hoy',
+                              '${totalLitersToday.toStringAsFixed(1)} L'),
+                          Container(
+                              width: 1, height: 40, color: Colors.white54),
+                          _buildSummaryStat(
+                              'En Ordeña', lactatingCows.length.toString()),
+                          Container(
+                              width: 1, height: 40, color: Colors.white54),
+                          _buildSummaryStat('Promedio',
+                              '${averagePerCow.toStringAsFixed(1)} L/vaca'),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '$cowsMilkedToday de ${lactatingCows.length} vacas ordeñadas hoy',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 11),
+                      ),
                     ],
                   ),
                 ),

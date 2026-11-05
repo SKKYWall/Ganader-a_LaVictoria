@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 // Modelos
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/models/transaction.dart';
+import 'package:manual_ganadero_flutter/core/carcass_yield.dart';
 
 class ReportesScreen extends StatefulWidget {
   const ReportesScreen({super.key});
@@ -279,7 +280,8 @@ class _ReportesScreenState extends State<ReportesScreen> {
         'Raza',
         'Propósito',
         'Último Peso (kg)',
-        'Canal Est. (58%)'
+        'Rendimiento Est.',
+        'Canal Est. (kg)'
       ];
       List<List<dynamic>> rows = animals.map((a) {
         double ultimoPeso = 0.0;
@@ -290,7 +292,8 @@ class _ReportesScreenState extends State<ReportesScreen> {
           pesoStats.sort((s1, s2) => s2.date.compareTo(s1.date));
           ultimoPeso = pesoStats.first.value;
         }
-        double canalEst = ultimoPeso * 0.58;
+        final rendimiento = carcassYieldFor(a.breed, a.sex);
+        double canalEst = ultimoPeso * rendimiento;
         return [
           a.earTagNumber,
           a.legNumber,
@@ -298,6 +301,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
           a.breed ?? '-',
           a.purpose ?? 'N/A',
           ultimoPeso > 0 ? ultimoPeso.toStringAsFixed(1) : 'Sin registro',
+          '${(rendimiento * 100).toStringAsFixed(0)}%',
           ultimoPeso > 0 ? canalEst.toStringAsFixed(1) : '-',
         ];
       }).toList();
