@@ -286,7 +286,14 @@ class _LecheScreenState extends State<LecheScreen> {
             final animals = snapshot.data!.docs
                 .map((d) => Animal.fromFirestore(
                     d.data() as Map<String, dynamic>, d.id))
+                .where((a) => a.status == 'activo')
                 .toList();
+
+            if (animals.isEmpty) {
+              return const Center(
+                  child: Text('No tienes vacas lecheras.',
+                      style: TextStyle(color: Colors.grey)));
+            }
 
             // Clasificamos las vacas
             final lactatingCows = animals.where((a) => !_isCowDry(a)).toList();

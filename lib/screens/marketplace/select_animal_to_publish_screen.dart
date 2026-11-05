@@ -291,10 +291,21 @@ class _SelectAnimalToPublishScreenState
                           'No tienes animales registrados en este rancho.'));
                 }
 
+                final activeDocs = snapshot.data!.docs.where((d) {
+                  final data = d.data() as Map<String, dynamic>;
+                  return (data['status'] as String? ?? 'activo') == 'activo';
+                }).toList();
+
+                if (activeDocs.isEmpty) {
+                  return const Center(
+                      child: Text(
+                          'No tienes animales activos para publicar.'));
+                }
+
                 return ListView.builder(
-                  itemCount: snapshot.data!.docs.length,
+                  itemCount: activeDocs.length,
                   itemBuilder: (context, index) {
-                    final doc = snapshot.data!.docs[index];
+                    final doc = activeDocs[index];
                     final data = doc.data() as Map<String, dynamic>;
                     final animalId = doc.id;
                     final isSelected =

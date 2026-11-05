@@ -10,6 +10,7 @@ import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:intl/intl.dart'; // Para formatear fechas
 import 'package:manual_ganadero_flutter/services/notification_service.dart';
 import 'package:manual_ganadero_flutter/widgets/live_voice_dialog.dart'; // <-- AGREGAR ESTO
+import 'package:manual_ganadero_flutter/widgets/animal_exit_dialog.dart';
 
 class BovinoScreen extends StatefulWidget {
   const BovinoScreen({super.key});
@@ -26,6 +27,7 @@ class _BovinoScreenState extends State<BovinoScreen> {
   String _searchText = '';
   String _selectedFilter = 'Todos';
   String _selectedOrder = 'name_asc';
+  bool _showArchived = false;
 
   final TextEditingController _searchController = TextEditingController();
 
@@ -173,123 +175,12 @@ class _BovinoScreenState extends State<BovinoScreen> {
     }
   }
 
-  // Eliminar Animal
-  Future<void> _handleDeleteAnimal(String animalId) async {
-    if (_currentUser == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuario no autenticado.')),
-      );
-      return;
-    }
-
-    // --- NUEVA LÓGICA: Verificar si el animal está publicado en el Marketplace ---
-    String? marketplaceListingId;
-    try {
-      final marketplaceQuery = await _firestore
-          .collection('marketplace_listings')
-          .where('ownerId', isEqualTo: _currentUser!.uid)
-          .where('originalAnimalId', isEqualTo: animalId)
-          .limit(1)
-          .get();
-
-      if (marketplaceQuery.docs.isNotEmpty) {
-        marketplaceListingId = marketplaceQuery.docs.first.id;
-      }
-    } catch (e) {
-      debugPrint(
-          'Error al verificar publicación en Marketplace desde BovinoScreen: ${e.toString()}');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Error al verificar publicación: ${e.toString()}')),
-      );
-      return; // Salir si hay un error al verificar
-    }
-
-    if (!mounted) return;
-
-    String confirmationMessage =
-        '¿Estás seguro de que quieres eliminar este animal? Esta acción no se puede deshacer.';
-    if (marketplaceListingId != null) {
-      confirmationMessage +=
-          '\n\n¡Advertencia! Este animal también está publicado en el Marketplace y su publicación será eliminada.';
-    }
-
-    bool? confirmDelete = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Eliminar Animal',
-              style: TextStyle(color: Color(0xFF5e3a1c))),
-          content: Text(
-            confirmationMessage,
-            style: const TextStyle(color: Colors.black87),
-          ),
-          backgroundColor: const Color(0xFFfbf6ec),
-          surfaceTintColor: const Color(0xFFfbf6ec),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar',
-                  style: TextStyle(color: Color(0xFF6b4226))),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child:
-                  const Text('Eliminar', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmDelete == true) {
-      try {
-        // Eliminar la publicación del Marketplace si existe
-        if (marketplaceListingId != null) {
-          try {
-            await _firestore
-                .collection('marketplace_listings')
-                .doc(marketplaceListingId)
-                .delete();
-            debugPrint('Publicación de Marketplace eliminada desde BovinoScreen.');
-          } catch (e) {
-            debugPrint(
-                'Advertencia: No se pudo eliminar la publicación del Marketplace desde BovinoScreen: ${e.toString()}');
-            // No lanzar el error, solo advertir
-          }
-        }
-        // Eliminar el documento del animal
-        // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
-        DocumentSnapshot userDoc =
-            await _firestore.collection('users').doc(_currentUser!.uid).get();
-        String? currentRanchId =
-            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
-
-        if (currentRanchId != null) {
-          // Eliminar el documento del animal en el rancho correcto
-          await _firestore
-              .collection('users')
-              .doc(_currentUser!.uid)
-              .collection('ranches')
-              .doc(currentRanchId)
-              .collection('animals')
-              .doc(animalId)
-              .delete();
-          await NotificationService().cancelNotification(animalId.hashCode);
-          _showSnackBar(
-              'Animal y publicaciones asociadas eliminadas exitosamente.');
-        } else {
-          _showSnackBar('Error: No hay rancho seleccionado.');
-        }
-        // --- FIN DE MODIFICACIÓN ---
-      } catch (e) {
-        debugPrint(
-            'Error al eliminar animal o publicación desde BovinoScreen: ${e.toString()}');
-        _showSnackBar('Error al eliminar animal: ${e.toString()}');
-      }
+  // Dar de baja (vendido/muerto/error de captura) — flujo compartido con
+  // animal_detail_screen.dart, ver lib/widgets/animal_exit_dialog.dart.
+  Future<void> _handleDeleteAnimal(Animal animal) async {
+    final changed = await showAnimalExitDialog(context, animal);
+    if (changed) {
+      await NotificationService().cancelNotification(animal.id.hashCode);
     }
   }
 
@@ -384,6 +275,26 @@ class _BovinoScreenState extends State<BovinoScreen> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Activos'),
+                  selected: !_showArchived,
+                  onSelected: (_) => setState(() => _showArchived = false),
+                  selectedColor: const Color(0xFFc99450),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Archivados'),
+                  selected: _showArchived,
+                  onSelected: (_) => setState(() => _showArchived = true),
+                  selectedColor: const Color(0xFFc99450),
+                ),
+              ],
+            ),
+          ),
           // --- INICIO DE MODIFICACIÓN MULTI-RANCHO ---
           Expanded(
             child: _currentUser == null
@@ -439,10 +350,21 @@ class _BovinoScreenState extends State<BovinoScreen> {
                                 child: Text('No hay animales registrados.'));
                           }
 
-                          final animals = snapshot.data!.docs.map((doc) {
-                            return Animal.fromFirestore(
-                                doc.data() as Map<String, dynamic>, doc.id);
-                          }).toList();
+                          final wantedStatus =
+                              _showArchived ? 'inactivo' : 'activo';
+                          final animals = snapshot.data!.docs
+                              .map((doc) => Animal.fromFirestore(
+                                  doc.data() as Map<String, dynamic>, doc.id))
+                              .where((a) => a.status == wantedStatus)
+                              .toList();
+
+                          if (animals.isEmpty) {
+                            return Center(
+                              child: Text(_showArchived
+                                  ? 'No tienes animales archivados.'
+                                  : 'No hay animales registrados.'),
+                            );
+                          }
 
                           return ListView.builder(
                             itemCount: animals.length,
@@ -560,9 +482,9 @@ class _BovinoScreenState extends State<BovinoScreen> {
                     tooltip: 'Editar Animal',
                   ),
                   IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () => _handleDeleteAnimal(animal.id),
-                    tooltip: 'Eliminar Animal',
+                    icon: const Icon(Icons.logout, color: Colors.red),
+                    onPressed: () => _handleDeleteAnimal(animal),
+                    tooltip: 'Dar de baja',
                   ),
                 ],
               ),

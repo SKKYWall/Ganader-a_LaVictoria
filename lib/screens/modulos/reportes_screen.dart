@@ -144,6 +144,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       final animals = snapshot.docs
           .map((doc) =>
               Animal.fromFirestore(doc.data() as Map<String, dynamic>, doc.id))
+          .where((a) => a.status == 'activo')
           .toList();
 
       List<String> headers = [
@@ -194,6 +195,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       final animals = snapshot.docs
           .map((doc) =>
               Animal.fromFirestore(doc.data() as Map<String, dynamic>, doc.id))
+          .where((a) => a.status == 'activo')
           .toList();
 
       List<String> headers = [
@@ -257,6 +259,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       final animals = snapshot.docs
           .map((doc) =>
               Animal.fromFirestore(doc.data() as Map<String, dynamic>, doc.id))
+          .where((a) => a.status == 'activo')
           .toList();
 
       List<String> headers = [
@@ -312,6 +315,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       final animals = snapshot.docs
           .map((doc) =>
               Animal.fromFirestore(doc.data() as Map<String, dynamic>, doc.id))
+          .where((a) => a.status == 'activo')
           .toList();
 
       List<String> headers = [

@@ -279,11 +279,18 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
                       style: TextStyle(color: Colors.grey)));
             }
 
-            // Obtenemos todas las hembras
+            // Obtenemos todas las hembras activas
             final allHembras = snapshot.data!.docs
                 .map((d) => Animal.fromFirestore(
                     d.data() as Map<String, dynamic>, d.id))
+                .where((a) => a.status == 'activo')
                 .toList();
+
+            if (allHembras.isEmpty) {
+              return const Center(
+                  child: Text('No tienes hembras registradas.',
+                      style: TextStyle(color: Colors.grey)));
+            }
 
             // Filtramos para la pestaña 1 (Vientres Libres): No están preñadas Y su propósito es Reproductora
             final vacias = allHembras

@@ -59,15 +59,22 @@ class _FinanceScreenState extends State<FinanceScreen> {
   Future<int> _getTotalAnimals(String ranchId) async {
     if (_currentUser == null) return 0;
     try {
+      // Nota: se trae el documento completo en vez de usar .count() porque
+      // los animales existentes antes de agregar el campo 'status' no lo
+      // tienen escrito — un filtro .where('status', isEqualTo: 'activo') a
+      // nivel Firestore los excluiría por completo (Firestore no trata un
+      // campo ausente como igual a 'activo'). Filtrar en memoria sí respeta
+      // el default.
       final snapshot = await _firestore
           .collection('users')
           .doc(_currentUser!.uid)
           .collection('ranches')
           .doc(ranchId)
           .collection('animals')
-          .count()
           .get();
-      return snapshot.count ?? 0;
+      return snapshot.docs
+          .where((d) => (d.data()['status'] as String? ?? 'activo') == 'activo')
+          .length;
     } catch (e) {
       return 0;
     }

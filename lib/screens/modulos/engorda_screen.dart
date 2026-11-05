@@ -597,9 +597,17 @@ class _EngordaScreenState extends State<EngordaScreen> {
 
             for (var doc in snapshot.data!.docs) {
               Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-              allAnimals.add(Animal.fromFirestore(data, doc.id));
+              final animal = Animal.fromFirestore(data, doc.id);
+              if (animal.status != 'activo') continue;
+              allAnimals.add(animal);
               animalRawData
                   .add(data); // Guardamos la data cruda para leer targetWeight
+            }
+
+            if (allAnimals.isEmpty) {
+              return const Center(
+                  child: Text('No hay animales en este flujo de producción.',
+                      style: TextStyle(color: Colors.grey)));
             }
 
             // Separamos por propósitos

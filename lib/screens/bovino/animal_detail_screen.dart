@@ -8,8 +8,8 @@ import 'package:manual_ganadero_flutter/models/animal.dart'; // ¡Importa tu mod
 import 'package:intl/intl.dart'; // Para formatear fechas
 import 'package:manual_ganadero_flutter/screens/bovino/edit_animal_screen.dart'; // Asegúrate de importar tu EditAnimalScreen
 import 'package:manual_ganadero_flutter/screens/bovino/register_animal_screen.dart';
-import 'package:firebase_storage/firebase_storage.dart'; // Importar para Firebase Storage para eliminar imagen
 import 'package:manual_ganadero_flutter/models/animal_stat.dart';
+import 'package:manual_ganadero_flutter/widgets/animal_exit_dialog.dart';
 
 class AnimalDetailScreen extends StatefulWidget {
   final String animalId; // Recibimos el ID del animal
@@ -25,8 +25,6 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
   bool _isLoading = true;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseStorage _storage =
-      FirebaseStorage.instance; // Instancia de Firebase Storage
 
   @override
   void initState() {
@@ -110,145 +108,13 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
     }
   }
 
-  Future<void> _confirmDeleteAnimal() async {
-    final user = _auth.currentUser;
-    if (user == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuario no autenticado.')),
-      );
-      return;
-    }
-
-    // --- LÓGICA: Verificar si el animal está publicado en el Marketplace (Colección Global) ---
-    String? marketplaceListingId;
-    try {
-      final marketplaceQuery = await _firestore
-          .collection('marketplace_listings')
-          .where('ownerId', isEqualTo: user.uid)
-          .where('originalAnimalId', isEqualTo: widget.animalId)
-          .limit(1)
-          .get();
-
-      if (marketplaceQuery.docs.isNotEmpty) {
-        marketplaceListingId = marketplaceQuery.docs.first.id;
-      }
-    } catch (e) {
-      debugPrint('Error al verificar publicación en Marketplace: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Error al verificar publicación: ${e.toString()}')),
-      );
-      return; // Salir si hay un error al verificar
-    }
-
-    if (!mounted) return;
-
-    String confirmationMessage =
-        '¿Estás seguro de que quieres eliminar este animal? Esta acción no se puede deshacer.';
-    if (marketplaceListingId != null) {
-      confirmationMessage +=
-          '\n\n¡Advertencia! Este animal también está publicado en el Marketplace y su publicación será eliminada.';
-    }
-
-    // Mostrar un diálogo de confirmación
-    final bool? confirm = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Eliminar Animal',
-              style: TextStyle(color: Color(0xFF5e3a1c))),
-          content: Text(
-            confirmationMessage,
-            style: const TextStyle(color: Colors.black87),
-          ),
-          backgroundColor: const Color(0xFFfbf6ec),
-          surfaceTintColor: const Color(0xFFfbf6ec),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(false); // No confirmar
-              },
-              child: const Text('Cancelar',
-                  style: TextStyle(color: Color(0xFF6b4226))),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.of(context).pop(true); // Confirmar
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red, // Botón de confirmación en rojo
-              ),
-              child:
-                  const Text('Eliminar', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirm == true) {
-      try {
-        // Antes de eliminar el documento del animal, eliminar su imagen de perfil si existe
-        if (_animal?.profileImageUrl != null) {
-          try {
-            final ref = _storage.refFromURL(_animal!.profileImageUrl!);
-            await ref.delete();
-            debugPrint('Imagen de perfil eliminada de Storage.');
-          } catch (e) {
-            debugPrint(
-                'Advertencia: No se pudo eliminar la imagen de perfil de Storage: ${e.toString()}');
-            // No lanzar el error, solo advertir, para que el documento en Firestore se elimine.
-          }
-        }
-
-        // --- LÓGICA: Eliminar la publicación del Marketplace si existe (Colección Global) ---
-        if (marketplaceListingId != null) {
-          try {
-            await _firestore
-                .collection('marketplace_listings')
-                .doc(marketplaceListingId)
-                .delete();
-            debugPrint('Publicación de Marketplace eliminada.');
-          } catch (e) {
-            debugPrint(
-                'Advertencia: No se pudo eliminar la publicación del Marketplace: ${e.toString()}');
-            // No lanzar el error, solo advertir
-          }
-        }
-
-        DocumentSnapshot userDoc =
-            await _firestore.collection('users').doc(user.uid).get();
-        String? currentRanchId =
-            (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
-
-        if (currentRanchId != null) {
-          // Eliminar el documento del animal
-          await _firestore
-              .collection('users')
-              .doc(user.uid)
-              .collection('ranches') // <-- NUEVO
-              .doc(currentRanchId) // <-- NUEVO
-              .collection('animals')
-              .doc(widget.animalId)
-              .delete();
-        }
-
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'Animal eliminado y su publicación de Marketplace (si existía) también.')), // Mensaje más claro
-        );
-        Navigator.of(context).pop(); // Volver a la pantalla anterior
-      } catch (e) {
-        debugPrint('Error al eliminar animal o publicación: ${e.toString()}');
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al eliminar: ${e.toString()}')),
-        );
-      }
+  // Dar de baja (vendido/muerto/error de captura) — flujo compartido con
+  // bovino_screen.dart, ver lib/widgets/animal_exit_dialog.dart.
+  Future<void> _showExitDialog() async {
+    if (_animal == null) return;
+    final changed = await showAnimalExitDialog(context, _animal!);
+    if (changed && mounted) {
+      Navigator.of(context).pop();
     }
   }
 
@@ -808,9 +674,9 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
             tooltip: 'Editar Animal',
           ),
           IconButton(
-            icon: const Icon(Icons.delete, color: Colors.red),
-            onPressed: _confirmDeleteAnimal,
-            tooltip: 'Eliminar Animal',
+            icon: const Icon(Icons.logout, color: Colors.red),
+            onPressed: _showExitDialog,
+            tooltip: 'Dar de baja',
           ),
         ],
       ),

@@ -147,6 +147,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .collection('animals')
         .snapshots()
         .map((snapshot) => snapshot.docs
+            .where((doc) =>
+                (doc.data()['status'] as String? ?? 'activo') == 'activo')
             .map((doc) => doc.data()['purpose'] as String?)
             .where((p) => p != null)
             .cast<String>()

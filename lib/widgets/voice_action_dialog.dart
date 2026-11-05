@@ -540,7 +540,10 @@ class VoiceActionDialog {
         pierna.trim().replaceAll(RegExp(r'[^0-9a-zA-Z]'), '').toLowerCase();
 
     final allDocs = await animalsRef.limit(200).get();
-    final docs = allDocs.docs;
+    final docs = allDocs.docs.where((d) {
+      final data = d.data() as Map<String, dynamic>;
+      return (data['status'] as String? ?? 'activo') == 'activo';
+    }).toList();
     if (docs.isEmpty) return null;
 
     bool isValidId(String s) =>

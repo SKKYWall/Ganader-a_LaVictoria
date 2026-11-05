@@ -92,6 +92,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
           .collection('animals')
           .get();
 
+      int activeCount = 0;
       int h = 0, m = 0, g = 0;
       Map<String, int> rCount = {};
       Map<String, int> pCount = {};
@@ -106,6 +107,8 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
 
       for (var doc in snapshot.docs) {
         final data = doc.data();
+        if ((data['status'] as String? ?? 'activo') != 'activo') continue;
+        activeCount++;
 
         // Sexo
         final sex = data['sex'] as String? ?? '';
@@ -214,7 +217,7 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
 
       setState(() {
         _nombreRancho = ranchName;
-        _total = snapshot.docs.length;
+        _total = activeCount;
         _hembras = h;
         _machos = m;
         _gestantes = g;

@@ -614,6 +614,7 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
           .get();
       final animals = animalsSnap.docs
           .map((d) => Animal.fromFirestore(d.data(), d.id))
+          .where((a) => a.status == 'activo')
           .toList();
 
       final now = DateTime.now();

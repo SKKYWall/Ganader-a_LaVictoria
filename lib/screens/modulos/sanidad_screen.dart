@@ -326,7 +326,17 @@ class _SanidadScreenState extends State<SanidadScreen> {
                       style: TextStyle(color: Colors.grey)));
             }
 
-            final allDocs = snapshot.data!.docs;
+            final allDocs = snapshot.data!.docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              return (data['status'] as String? ?? 'activo') == 'activo';
+            }).toList();
+
+            if (allDocs.isEmpty) {
+              return const Center(
+                  child: Text('No tienes animales registrados.',
+                      style: TextStyle(color: Colors.grey)));
+            }
+
             List<DocumentSnapshot> quarantinedDocs = [];
             List<DocumentSnapshot> availableDocs = [];
 
