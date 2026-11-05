@@ -34,6 +34,7 @@ class _MarketplaceProductDetailScreenState
           .collection('marketplace_listings')
           .doc(widget.listingId)
           .get();
+      if (!mounted) return;
       if (doc.exists) {
         setState(() {
           _listing = doc.data();
@@ -43,6 +44,7 @@ class _MarketplaceProductDetailScreenState
         Navigator.pop(context);
       }
     } catch (e) {
+      if (!mounted) return;
       Navigator.pop(context);
     }
   }
@@ -65,6 +67,7 @@ class _MarketplaceProductDetailScreenState
     try {
       await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
               'No se pudo abrir WhatsApp. Intenta agregarlo manualmente.')));

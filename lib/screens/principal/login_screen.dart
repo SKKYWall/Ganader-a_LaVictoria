@@ -12,7 +12,7 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
@@ -85,8 +85,9 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
       } catch (e) {
-        if (mounted)
+        if (mounted) {
           _showAlert('Error', 'Ocurrió un error al cargar tus datos: $e');
+        }
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -211,8 +212,9 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         _showAlert('Error', 'No se pudo iniciar sesión con Google: $e');
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -345,10 +347,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           color: Color(0xFFd9c7ae)),
                     ),
                     validator: (value) {
-                      if (value == null || value.isEmpty)
+                      if (value == null || value.isEmpty) {
                         return 'Por favor, ingresa tu correo electrónico';
-                      if (!value.contains('@'))
+                      }
+                      if (!value.contains('@')) {
                         return 'Por favor, ingresa un correo electrónico válido';
+                      }
                       return null;
                     },
                   ),
@@ -393,8 +397,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     validator: (value) {
-                      if (value == null || value.isEmpty)
+                      if (value == null || value.isEmpty) {
                         return 'Por favor, ingresa tu contraseña';
+                      }
                       return null;
                     },
                   ),

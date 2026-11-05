@@ -60,10 +60,11 @@ class _NotificationSettingsScreenState
       if (!mounted) return;
       _errorMessage = 'Error al cargar la configuración: ${e.toString()}';
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -85,6 +86,7 @@ class _NotificationSettingsScreenState
           .doc(_currentUser!.uid)
           .set({'notificationsEnabled': value}, SetOptions(merge: true));
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(value
@@ -165,7 +167,7 @@ class _NotificationSettingsScreenState
                             ),
                             value: _notificationsEnabled,
                             onChanged: _updateNotificationSetting,
-                            activeColor: const Color(
+                            activeThumbColor: const Color(
                                 0xFF6b4226), // Color cuando está activo
                             inactiveTrackColor: Colors.grey[
                                 300], // Color de la pista cuando está inactivo

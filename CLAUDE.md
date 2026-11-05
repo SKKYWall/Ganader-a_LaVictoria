@@ -21,9 +21,12 @@ por lo que el rancho sigue funcionando sin señal y sincroniza al reconectar.
 
 ## 2. Estado funcional actual
 
-**Compila limpio.** `flutter analyze` no arroja ningún error, solo ~185 avisos de estilo/lint
-(imports sin usar, `BuildContext` cruzando `async gaps`, APIs deprecadas como `Share.shareXFiles`,
-`value:` en lugar de `initialValue:`, etc.). Es deuda técnica menor, no bugs bloqueantes.
+**Compila limpio y sin avisos.** `flutter analyze` da `No issues found!` (0 de 0 — se limpiaron los
+~185 avisos de estilo/lint que había en el análisis original de nov. 2026: imports sin usar,
+`BuildContext` cruzando `async gaps`, APIs deprecadas como `Share.shareXFiles`, `value:` en lugar de
+`initialValue:`, `Radio`/`groupValue` migrado a `RadioGroup`, etc. — ver sección 2.1). Build
+verificado con `flutter build web --debug` y `flutter build apk --debug`. Hay tests unitarios reales
+en `test/` (`models_test.dart`, `quota_service_test.dart`) que corren con `flutter test`.
 
 **Lo que SÍ funciona de punta a punta (código completo, conectado a Firestore):**
 - Autenticación (email/password + Google Sign-In), onboarding de rancho, aceptación de términos.
@@ -46,26 +49,37 @@ por lo que el rancho sigue funcionando sin señal y sincroniza al reconectar.
 - Marketplace de compra/venta de animales entre usuarios (colección global, no por rancho).
 
 **Lo que NO está terminado / no funciona aún:**
-- **Modelo de visión por computadora huérfano.** `pubspec.yaml` declara `tflite_flutter` y existen
-  `assets/models/model_unquant.tflite` + `labels.txt` (clasifica razas: Nelore, Charolais, Brahman
-  gris/rojo/negro, Simmental, Angus — y condiciones de salud: sano, heridas, berrugas,
-  dermatofitosis, flaco). **Ningún archivo en `lib/` usa `Interpreter` ni importa `tflite_flutter`.**
-  Es decir: hay un modelo de IA de "foto → raza/enfermedad" entrenado y empaquetado, pero sin
-  ninguna pantalla que lo invoque. Es la pieza más clara de funcionalidad planeada-pero-no-cableada.
 - **IAP (compras in-app) no verificado en producción.** El código de `DonationsScreen` /
   `QuotaService` está completo, pero depende de configuración manual en Play Console (IDs de
   producto: `consults_pack_10`, `consults_pack_25`, `premium_monthly`) que debe existir y estar
   activa del lado de la tienda — no es algo que se pueda probar completo en debug/local.
 - **Dos placeholders sin reemplazar** en [lib/core/app_constants.dart](lib/core/app_constants.dart):
   número de WhatsApp de soporte (`521XXXXXXXXXX`) y URL de App Store (`idXXXXXXXXX`). Bloqueantes
-  antes de publicar en iOS o de que el botón de soporte funcione de verdad.
-- **`test/widget_test.dart`** es el boilerplate default de `flutter create` (prueba un contador que
-  no existe en esta app) — fallaría si se ejecutara. No hay ningún test real del proyecto.
-- **`lib/services/firebase_service.dart`** es código muerto: no lo importa ningún otro archivo
-  (confirmado por grep). Duplica la inicialización que ya hace `main.dart`.
-- Sin `CAMERA` en `AndroidManifest.xml` — hoy no es bug porque todo el código usa
-  `ImageSource.gallery`, pero si algún día se agrega "tomar foto" para el modelo TFLite, hay que
-  añadir el permiso.
+  antes de publicar en iOS o de que el botón de soporte funcione de verdad. Se dejaron así a
+  propósito (decisión del usuario, nov. 2026) hasta tener los datos reales.
+- **`GEMINI_API_KEY` sigue viajando en el cliente** (ver sección 6) — se decidió explícitamente
+  posponer la migración a un backend/Cloud Function porque implica activar Firebase Blaze y es un
+  proyecto aparte, no un simple fix.
+
+### 2.1 Limpieza de riesgos/errores realizada (nov. 2026)
+
+En una segunda ronda se corrigió todo lo señalado arriba que era seguro de arreglar sin tocar
+comportamiento visible ni de negocio:
+- Se eliminó el **modelo TFLite huérfano** (`tflite_flutter`, `image`, `assets/models/`) — no tenía
+  ninguna pantalla que lo usara, decisión del usuario fue quitarlo en vez de implementarlo.
+- Se eliminó **`lib/services/firebase_service.dart`** (código muerto confirmado).
+- Se reemplazó **`test/widget_test.dart`** (boilerplate roto) por `test/models_test.dart` y
+  `test/quota_service_test.dart` con cobertura real de la lógica más frágil (round-trip de
+  `Animal.fromFirestore/toFirestore`, y toda la lógica de cuotas/premium de `QuotaService`).
+- Se corrigieron los ~185 avisos de `flutter analyze` hasta dejarlo en `No issues found!`, incluyendo
+  los `use_build_context_synchronously` reales (riesgo de crash si el widget se desmonta durante un
+  `await`) y la migración de `RadioListTile.groupValue/onChanged` a `RadioGroup` en el formulario de
+  transacciones — verificado contra el código fuente del SDK de Flutter instalado para confirmar que
+  cada reemplazo (`value:`→`initialValue:`, `activeColor:`→`activeThumbColor:`, `desiredAccuracy:`→
+  `locationSettings:`, parámetros sueltos de `speech_to_text`→`SpeechListenOptions`) es 100%
+  equivalente en comportamiento, sin cambios visuales ni funcionales.
+- Verificado con `flutter analyze` (0 issues), `flutter test` (19/19 tests), `flutter build web
+  --debug` y `flutter build apk --debug` (ambos compilan sin errores).
 
 ## 3. Arquitectura técnica
 
@@ -90,7 +104,7 @@ lib/
 ├── core/app_constants.dart   → constantes globales (soporte, legal, store links)
 ├── models/                   → Animal, AnimalStat, CalendarEvent, MarketplaceListing, Product, Transaction
 ├── services/                 → AuthService, FirestoreService, QuotaService, AIVoiceService,
-│                                NotificationService, ModuleService, FirebaseService (muerto)
+│                                NotificationService, ModuleService
 ├── widgets/                  → dashboard_widgets, dashboard_charts, live_voice_dialog, voice_action_dialog
 └── screens/
     ├── principal/            → Login, Register, Dashboard (hub), Tutorial onboarding
@@ -176,32 +190,24 @@ Puntos importantes para no romper nada al tocar datos:
 - La cuota premium no es realmente "ilimitada": tiene un tope invisible de 1500 consultas/mes
   (`QuotaService.kPremiumMonthlyLimit`) para evitar abuso; esto es intencional, no un bug.
 
-## 6. Mejoras sugeridas (de mayor a menor impacto)
+## 6. Mejoras sugeridas pendientes (de mayor a menor impacto)
 
-1. **Decidir qué hacer con el modelo TFLite huérfano**: o se cablea una pantalla de "diagnóstico
-   por foto" (raza + salud) que use `tflite_flutter` + `image_picker` + `image` como estaba
-   planeado, o se elimina la dependencia y los assets si ya no es el plan — hoy solo infla el
-   tamaño de la app sin dar valor.
-2. **Sacar la `GEMINI_API_KEY` del cliente**. Hoy viaja embebida en el binario (vía `.env`
+> Los puntos de código ya corregidos (TFLite huérfano, `firebase_service.dart` muerto, tests,
+> avisos de `flutter analyze`) se movieron a la sección 2.1. Lo que queda abajo son decisiones que
+> requieren input del usuario (dinero, cuentas externas, datos reales) y por eso no se tocaron.
+
+1. **Sacar la `GEMINI_API_KEY` del cliente**. Hoy viaja embebida en el binario (vía `.env`
    empaquetado como asset) y es extraíble por cualquiera que descompile el APK. Lo correcto a
    mediano plazo es mover las llamadas a Gemini detrás de una Cloud Function o un backend propio
-   que valide al usuario y oculte la key.
-3. **Agregar tests reales.** Hoy no hay ninguno (el único archivo es el boilerplate de
-   `flutter create`, que ni siquiera corre contra la app real). Empezar por los modelos
-   (`fromFirestore`/`toFirestore`) y `QuotaService` (la lógica de cuotas/premium es la más
-   fácil de romper silenciosamente).
-4. **Completar los placeholders de `app_constants.dart`** (WhatsApp real, URL de App Store) antes
+   que valide al usuario y oculte la key. Pospuesto a propósito: requiere activar Firebase Blaze
+   y es un proyecto de arquitectura aparte, no un fix rápido.
+2. **Completar los placeholders de `app_constants.dart`** (WhatsApp real, URL de App Store) antes
    de cualquier publicación — hoy el botón de soporte y el enlace de iOS no llevan a nada real.
-5. **Unificar el acceso a datos detrás de `FirestoreService`** en vez de que cada pantalla
+   Pendiente de que el usuario tenga esos datos.
+3. **Unificar el acceso a datos detrás de `FirestoreService`** en vez de que cada pantalla
    instancie `FirebaseFirestore.instance` directo — facilita testear y cambiar la estructura de
    colecciones sin tocar 20 archivos.
-6. **Eliminar `firebase_service.dart`** (confirmado código muerto, sin ningún import en el resto
-   de `lib/`) o documentar por qué se mantiene si hay un plan para él.
-7. **Limpiar los ~185 avisos de `flutter analyze`**, en particular los `use_build_context_synchronously`
-   (riesgo real de crash si el usuario navega rápido mientras hay una operación async pendiente) y
-   las APIs deprecadas (`Share.shareXFiles`, `value:` en `DropdownButtonFormField`, `desiredAccuracy`
-   de `geolocator`) antes de que Flutter las remueva en una versión futura.
-8. **Validar el flujo de IAP contra Play Console real** (los product IDs existen en el código pero
+4. **Validar el flujo de IAP contra Play Console real** (los product IDs existen en el código pero
    no se puede confirmar que estén activos/aprobados en la tienda sin revisar la consola).
 
 ## 7. Notas para trabajar en este repo (humano o IA)
@@ -211,8 +217,9 @@ Puntos importantes para no romper nada al tocar datos:
 - No hay gestor de estado: si agregas una pantalla nueva, sigue el patrón existente
   (`StatefulWidget` + `StreamBuilder`/`FutureBuilder` sobre Firestore), no introduzcas Provider/Bloc
   a menos que se decida migrar todo el proyecto a la vez.
-- Antes de asumir que una dependencia de `pubspec.yaml` está en uso, **verifica con grep** — el
-  caso de `tflite_flutter` (sección 2) muestra que el `pubspec.yaml` no siempre refleja el código
+- Antes de asumir que una dependencia de `pubspec.yaml` está en uso, **verifica con grep** — en
+  nov. 2026 se encontró `tflite_flutter`/`image` declaradas sin ningún código consumidor (ya se
+  eliminaron, ver sección 2.1), lo que confirma que el `pubspec.yaml` no siempre refleja el código
   real.
 - Las rutas nombradas en `main.dart` casi nunca reciben argumentos vía `ModalRoute` (excepción:
   `/marketplaceProductDetail`); el resto de la navegación con parámetros usa

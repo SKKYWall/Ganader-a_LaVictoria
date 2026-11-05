@@ -31,7 +31,6 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
   late TextEditingController _hectaresController;
 
   bool _isLoading = true;
-  String? _errorMessage;
 
   // --- VARIABLES PARA MULTI-RANCHO ---
   List<Map<String, dynamic>> _ranches = [];
@@ -120,11 +119,7 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
         }
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Error al cargar los datos: $e';
-        });
-      }
+      debugPrint('Error al cargar los datos: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -290,7 +285,7 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
                                   .set({'currentRanchId': newRef.id},
                                       SetOptions(merge: true));
 
-                              if (mounted) {
+                              if (context.mounted) {
                                 Navigator.pop(context);
                                 ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
@@ -495,7 +490,7 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 16.0, vertical: 8.0),
                             child: DropdownButtonFormField<String>(
-                              value: _selectedRanchId,
+                              initialValue: _selectedRanchId,
                               decoration: const InputDecoration(
                                 labelText: 'Selecciona el rancho a editar',
                                 prefixIcon: Icon(Icons.home_work,

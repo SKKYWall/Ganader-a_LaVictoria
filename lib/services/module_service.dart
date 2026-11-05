@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:manual_ganadero_flutter/services/firestore_service.dart'; // Ajusta la ruta si es diferente
 
 class ModuleService {

@@ -222,9 +222,6 @@ class _InAppNotificationScreenState extends State<InAppNotificationScreen> {
             itemCount: notifications.length,
             itemBuilder: (context, index) {
               final notification = notifications[index];
-              bool isSelected =
-                  false; // Este isSelected se usaba para la comparación en IA, aquí no aplica
-              // Se mantiene para evitar errores si la lógica de onTap es compleja
               return Card(
                 margin: const EdgeInsets.only(bottom: 10.0),
                 elevation:

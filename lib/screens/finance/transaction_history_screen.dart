@@ -152,7 +152,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         isExpanded: true, // <-- SOLUCIÓN 2: Evita el overflow
-                        value: _filterType,
+                        initialValue: _filterType,
                         decoration: _inputDecoration('Tipo'),
                         items: const [
                           DropdownMenuItem(
@@ -179,7 +179,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         isExpanded: true, // <-- SOLUCIÓN 2: Evita el overflow
-                        value: _filterCategory,
+                        initialValue: _filterCategory,
                         decoration: _inputDecoration('Categoría'),
                         items: [
                           const DropdownMenuItem(
@@ -208,7 +208,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     Expanded(
                       child: DropdownButtonFormField<int>(
                         isExpanded: true,
-                        value: _filterMonth,
+                        initialValue: _filterMonth,
                         decoration: _inputDecoration('Mes'),
                         items: List.generate(12, (index) => index + 1)
                             .map((month) {
@@ -229,7 +229,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     Expanded(
                       child: DropdownButtonFormField<int>(
                         isExpanded: true,
-                        value: _filterYear,
+                        initialValue: _filterYear,
                         decoration: _inputDecoration('Año'),
                         items: years.map((year) {
                           return DropdownMenuItem(

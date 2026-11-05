@@ -95,8 +95,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         _showAlert('Error', 'No se pudo crear el perfil del usuario: $e');
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

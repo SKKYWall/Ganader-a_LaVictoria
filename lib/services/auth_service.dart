@@ -57,10 +57,12 @@ class AuthService {
       await _auth.sendPasswordResetEmail(email: email);
       return null; // Retorna null si todo salió bien (sin errores)
     } on FirebaseAuthException catch (e) {
-      if (e.code == 'user-not-found')
+      if (e.code == 'user-not-found') {
         return 'No hay ningún usuario registrado con este correo.';
-      if (e.code == 'invalid-email')
+      }
+      if (e.code == 'invalid-email') {
         return 'El correo no tiene un formato válido.';
+      }
       return 'Error al enviar el correo de recuperación.';
     } catch (e) {
       return 'Ocurrió un error inesperado al intentar recuperar la cuenta.';

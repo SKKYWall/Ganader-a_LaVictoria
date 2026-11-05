@@ -45,8 +45,9 @@ class _LecheScreenState extends State<LecheScreen> {
 
   // Stream para obtener las vacas lecheras
   Stream<QuerySnapshot> _getLecheAnimals() {
-    if (_currentUser == null || _currentRanchId == null)
+    if (_currentUser == null || _currentRanchId == null) {
       return const Stream.empty();
+    }
     return _firestore
         .collection('users') // <-- AGREGADO
         .doc(_currentUser!.uid) // <-- AGREGADO
@@ -123,7 +124,7 @@ class _LecheScreenState extends State<LecheScreen> {
                       .update({
                     'stats': FieldValue.arrayUnion([newStat.toFirestore()]),
                   });
-                  if (mounted) {
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                           content: Text('Estado actualizado a: $newLabel'),
@@ -173,8 +174,9 @@ class _LecheScreenState extends State<LecheScreen> {
               ),
               validator: (val) {
                 if (val == null || val.isEmpty) return 'Ingresa los litros';
-                if (double.tryParse(val) == null)
+                if (double.tryParse(val) == null) {
                   return 'Ingresa un número válido';
+                }
                 return null;
               },
             ),
@@ -210,10 +212,11 @@ class _LecheScreenState extends State<LecheScreen> {
                       'stats':
                           updatedStats.map((s) => s.toFirestore()).toList(),
                     });
-                    if (mounted)
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('¡Ordeña registrada!'),
                           backgroundColor: Colors.green));
+                    }
                   } catch (e) {
                     debugPrint("Error registrando ordeña: $e");
                   }
@@ -270,13 +273,15 @@ class _LecheScreenState extends State<LecheScreen> {
         body: StreamBuilder<QuerySnapshot>(
           stream: _getLecheAnimals(),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting)
+            if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
                   child: CircularProgressIndicator(color: Color(0xFF6b4226)));
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
               return const Center(
                   child: Text('No tienes vacas lecheras.',
                       style: TextStyle(color: Colors.grey)));
+            }
 
             final animals = snapshot.data!.docs
                 .map((d) => Animal.fromFirestore(
@@ -360,10 +365,11 @@ class _LecheScreenState extends State<LecheScreen> {
 
   // WIDGET PARA LISTA DE VACAS EN ORDEÑA
   Widget _buildLactatingList(List<Animal> lactatingCows) {
-    if (lactatingCows.isEmpty)
+    if (lactatingCows.isEmpty) {
       return const Center(
           child: Text('No hay vacas en ordeña.',
               style: TextStyle(color: Colors.grey)));
+    }
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -452,10 +458,11 @@ class _LecheScreenState extends State<LecheScreen> {
 
   // WIDGET PARA LISTA DE VACAS SECAS
   Widget _buildDryCowsList(List<Animal> dryCows) {
-    if (dryCows.isEmpty)
+    if (dryCows.isEmpty) {
       return const Center(
           child: Text('No tienes vacas en periodo seco.',
               style: TextStyle(color: Colors.grey)));
+    }
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),

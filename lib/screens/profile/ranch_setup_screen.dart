@@ -36,8 +36,10 @@ class _RanchSetupScreenState extends State<RanchSetupScreen> {
       if (permission == LocationPermission.always ||
           permission == LocationPermission.whileInUse) {
         Position position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high);
+            locationSettings:
+                const LocationSettings(accuracy: LocationAccuracy.high));
 
+        if (!mounted) return;
         setState(() {
           _latitude = position.latitude;
           _longitude = position.longitude;
@@ -51,6 +53,7 @@ class _RanchSetupScreenState extends State<RanchSetupScreen> {
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text('Error al obtener ubicación: $e'),

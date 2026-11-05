@@ -22,9 +22,8 @@ dependencies:
 
   # Dependencias para la funcionalidad de IA
   image_picker: ^1.1.0 # Añadida: Para seleccionar imágenes de la galería o cámara
-  tflite_flutter: ^0.11.0 # Añadida: Para ejecutar modelos TensorFlow Lite
-  image: ^4.2.0 # Añadida: Para manipular (redimensionar) imágenes antes del análisis
   path_provider: ^2.1.5 # Añadida: Útil para manejar rutas de archivos temporales
+  path: ^1.9.1
 
   # Otras dependencias que ya tenías
   fl_chart: ^1.0.0
@@ -60,10 +59,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # Asegúrate de que esta sección incluya la carpeta donde está tu modelo de IA
   assets:
     - assets/
-    - assets/models/
     - assets/splash_logo.png
     - assets/splash_icon_android12.png
     - .env

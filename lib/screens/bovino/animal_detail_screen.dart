@@ -142,6 +142,8 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
       return; // Salir si hay un error al verificar
     }
 
+    if (!mounted) return;
+
     String confirmationMessage =
         '¿Estás seguro de que quieres eliminar este animal? Esta acción no se puede deshacer.';
     if (marketplaceListingId != null) {
@@ -646,10 +648,11 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
           _loadAnimalData(); // Recarga la pantalla
         }
       } catch (e) {
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text('Error al eliminar: $e'),
               backgroundColor: Colors.red));
+        }
       }
     }
   }
@@ -1058,7 +1061,7 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
                         _animal!.vaccinations!.isNotEmpty
                     ? Column(
                         children: _animal!.vaccinations!.map((med) {
-                          String name = med.name ?? 'Tratamiento';
+                          String name = med.name;
 
                           // CORRECCIÓN: Como tu modelo ya lo convirtió a DateTime, lo usamos directo
                           DateTime date = med.date;

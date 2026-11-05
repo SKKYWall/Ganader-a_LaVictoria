@@ -351,7 +351,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                     }
                                     if (index >=
                                             currentMonthTransactions.length ||
-                                        index >= 10) return null;
+                                        index >= 10) {
+                                      return null;
+                                    }
 
                                     Transaction t =
                                         currentMonthTransactions[index];

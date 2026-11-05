@@ -126,6 +126,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
         final currentRanchId = userDoc.data()?['currentRanchId'];
 
+        if (!mounted) return;
         if (currentRanchId == null) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('No hay un rancho seleccionado.')),

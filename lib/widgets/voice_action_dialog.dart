@@ -92,13 +92,15 @@ class VoiceActionDialog {
       final data = await AIVoiceService.processCommand(transcribedText);
       if (context.mounted) Navigator.of(context).pop();
       if (data == null) {
-        if (context.mounted)
+        if (context.mounted) {
           _showSnack(context, 'No entendí la instrucción. Intenta de nuevo.',
               Colors.orange);
+        }
         return;
       }
-      if (context.mounted)
+      if (context.mounted) {
         await showConfirmationModal(context, data, transcribedText);
+      }
     } catch (e) {
       if (context.mounted) {
         Navigator.of(context).pop();
@@ -149,6 +151,7 @@ class VoiceActionDialog {
         text: _cleanDateField(data['fecha_nacimiento']?.toString() ?? ''));
 
     if (autoExecute) {
+      if (!context.mounted) return;
       await _ejecutarAccionFirebase(
           context,
           accion,
@@ -214,8 +217,10 @@ class VoiceActionDialog {
                 await speech.stop();
                 setModalState(() => isListeningConfirm = false);
 
+                if (!ctx.mounted) return;
                 if (confirmed) {
                   Navigator.of(ctx).pop();
+                  if (!context.mounted) return;
                   _ejecutarAccionFirebase(
                       context,
                       accion,
@@ -236,9 +241,11 @@ class VoiceActionDialog {
                 }
               },
               localeId: 'es-MX',
-              cancelOnError: true,
-              partialResults: false, // FIX #3: solo resultado final
-              listenMode: stt.ListenMode.search, // FIX #4: mode válido
+              listenOptions: stt.SpeechListenOptions(
+                cancelOnError: true,
+                partialResults: false, // FIX #3: solo resultado final
+                listenMode: stt.ListenMode.search, // FIX #4: mode válido
+              ),
               pauseFor: const Duration(seconds: 8),
             );
           }
@@ -565,8 +572,9 @@ class VoiceActionDialog {
     if (nameLower.isNotEmpty) {
       for (final d in docs) {
         final data = d.data() as Map<String, dynamic>;
-        if ((data['name'] ?? '').toString().toLowerCase() == nameLower)
+        if ((data['name'] ?? '').toString().toLowerCase() == nameLower) {
           return d;
+        }
       }
     }
     // 4. Nombre parcial
@@ -574,8 +582,9 @@ class VoiceActionDialog {
       for (final d in docs) {
         final data = d.data() as Map<String, dynamic>;
         final docName = (data['name'] ?? '').toString().toLowerCase();
-        if (docName.contains(nameLower) || nameLower.contains(docName))
+        if (docName.contains(nameLower) || nameLower.contains(docName)) {
           return d;
+        }
       }
     }
     // 5. Arete parcial
@@ -586,20 +595,22 @@ class VoiceActionDialog {
             .toString()
             .replaceAll(RegExp(r'[^0-9a-zA-Z]'), '')
             .toLowerCase();
-        if (docArete.contains(areteClean) || areteClean.contains(docArete))
+        if (docArete.contains(areteClean) || areteClean.contains(docArete)) {
           return d;
+        }
       }
     }
     // 6. Pierna parcial
-    if (isValidId(piernaClean) && piernaClean.length >= 1) {
+    if (isValidId(piernaClean) && piernaClean.isNotEmpty) {
       for (final d in docs) {
         final data = d.data() as Map<String, dynamic>;
         final docLeg = (data['legNumber'] ?? '')
             .toString()
             .replaceAll(RegExp(r'[^0-9a-zA-Z]'), '')
             .toLowerCase();
-        if (docLeg.contains(piernaClean) || piernaClean.contains(docLeg))
+        if (docLeg.contains(piernaClean) || piernaClean.contains(docLeg)) {
           return d;
+        }
       }
     }
     // 7. Nombre es número → buscar en arete y pierna
@@ -643,6 +654,7 @@ class VoiceActionDialog {
     await tts.setSpeechRate(0.48);
     await tts.awaitSpeakCompletion(true);
 
+    if (!context.mounted) return;
     if (animalName.isEmpty && arete.isEmpty && pierna.isEmpty) {
       _showSnack(context, 'No se pudo identificar el animal.', Colors.orange);
       await tts.speak('No pude identificar al animal');
@@ -655,6 +667,7 @@ class VoiceActionDialog {
           .doc(user.uid)
           .get();
       final ranchId = userDoc.data()?['currentRanchId'] as String?;
+      if (!context.mounted) return;
       if (ranchId == null) {
         _showSnack(context, 'No hay rancho seleccionado.', Colors.orange);
         return;
@@ -674,6 +687,7 @@ class VoiceActionDialog {
             name: animalName,
             arete: arete,
             pierna: pierna);
+        if (!context.mounted) return;
         if (duplicate != null) {
           final dupName = (duplicate.data() as Map<String, dynamic>)['name'] ??
               'sin nombre';
@@ -722,6 +736,7 @@ class VoiceActionDialog {
             'birthWeight': double.parse(peso),
         });
 
+        if (!context.mounted) return;
         _showSnack(context, '✅ Animal "${_capitalize(animalName)}" registrado.',
             Colors.green);
         await tts.speak('Animal registrado correctamente');
@@ -735,6 +750,7 @@ class VoiceActionDialog {
           arete: arete,
           pierna: pierna);
 
+      if (!context.mounted) return;
       if (found == null) {
         _showSnack(context, 'No encontré ningún animal con esos datos.',
             Colors.orange);
@@ -749,6 +765,7 @@ class VoiceActionDialog {
       switch (accion) {
         case 'eliminar_animal':
           await docRef.delete();
+          if (!context.mounted) return;
           _showSnack(context, '🗑️ Animal "$realName" eliminado.', Colors.red);
           await tts.speak('Animal eliminado correctamente');
           break;
@@ -757,12 +774,15 @@ class VoiceActionDialog {
           final updates = <String, dynamic>{};
           if (_validBreeds.contains(raza)) updates['breed'] = raza;
           if (_validSex.contains(sexo)) updates['sex'] = sexo;
-          if (_validPurposes.contains(proposito))
+          if (_validPurposes.contains(proposito)) {
             updates['purpose'] = proposito;
-          if (arete.isNotEmpty && !arete.toLowerCase().contains('sin'))
+          }
+          if (arete.isNotEmpty && !arete.toLowerCase().contains('sin')) {
             updates['earTagNumber'] = _cleanId(arete);
-          if (pierna.isNotEmpty && !pierna.toLowerCase().contains('sin'))
+          }
+          if (pierna.isNotEmpty && !pierna.toLowerCase().contains('sin')) {
             updates['legNumber'] = _cleanId(pierna);
+          }
           if (detalles.isNotEmpty) {
             final cur = docData['description'] as String? ?? '';
             updates['description'] = cur.isEmpty ? detalles : '$cur\n$detalles';
@@ -775,6 +795,7 @@ class VoiceActionDialog {
           }
           if (updates.isNotEmpty) {
             await docRef.update(updates);
+            if (!context.mounted) return;
             _showSnack(
                 context, '✅ Animal "$realName" actualizado.', Colors.green);
             await tts.speak('Animal actualizado correctamente');
@@ -797,6 +818,7 @@ class VoiceActionDialog {
               }
             ])
           });
+          if (!context.mounted) return;
           _showSnack(context, '✅ ${pesoVal}kg registrado para "$realName".',
               Colors.green);
           await tts.speak(
@@ -820,6 +842,7 @@ class VoiceActionDialog {
               {'name': vName, 'date': Timestamp.now()}
             ])
           });
+          if (!context.mounted) return;
           _showSnack(context, '✅ Vacuna "$vName" registrada para "$realName".',
               Colors.green);
           await tts.speak('Vacuna $vName registrada para $realName');
@@ -854,12 +877,14 @@ class VoiceActionDialog {
                   cur.isEmpty ? '$fechaStr: $nota' : '$cur\n$fechaStr: $nota',
             });
           }
+          if (!context.mounted) return;
           _showSnack(
               context, '✅ Evento registrado para "$realName".', Colors.green);
           await tts.speak('Evento guardado');
           break;
       }
     } catch (e) {
+      if (!context.mounted) return;
       _showSnack(context, 'Error en base de datos: $e', Colors.red);
     }
   }
@@ -882,7 +907,9 @@ class VoiceActionDialog {
     if (lower.isEmpty ||
         lower == 'n/a' ||
         lower.contains('sin') ||
-        lower == 'null') return 'N/A';
+        lower == 'null') {
+      return 'N/A';
+    }
     return val.trim();
   }
 
@@ -891,7 +918,9 @@ class VoiceActionDialog {
     if (lower.isEmpty ||
         lower == 'n/a' ||
         lower.contains('sin') ||
-        lower == 'null') return '';
+        lower == 'null') {
+      return '';
+    }
     return val.trim();
   }
 
@@ -900,7 +929,9 @@ class VoiceActionDialog {
     if (lower.isEmpty ||
         lower.contains('no ') ||
         lower == 'null' ||
-        lower == 'no proporcionado') return '';
+        lower == 'no proporcionado') {
+      return '';
+    }
     return val.trim();
   }
 
@@ -927,7 +958,7 @@ class VoiceActionDialog {
   static Widget _sexoDropdown(TextEditingController ctrl, StateSetter set) {
     final currentVal = _validSex.contains(ctrl.text) ? ctrl.text : '';
     return DropdownButtonFormField<String>(
-      value: currentVal,
+      initialValue: currentVal,
       decoration: const InputDecoration(
           labelText: 'Sexo',
           border: OutlineInputBorder(),
@@ -946,7 +977,7 @@ class VoiceActionDialog {
     final currentVal =
         _validPurposes.contains(ctrl.text) ? ctrl.text : _validPurposes.first;
     return DropdownButtonFormField<String>(
-      value: currentVal,
+      initialValue: currentVal,
       decoration: const InputDecoration(
           labelText: 'Propósito',
           border: OutlineInputBorder(),
@@ -962,7 +993,7 @@ class VoiceActionDialog {
   static Widget _razaDropdown(TextEditingController ctrl, StateSetter set) {
     final currentVal = _validBreeds.contains(ctrl.text) ? ctrl.text : 'Otro';
     return DropdownButtonFormField<String>(
-      value: currentVal,
+      initialValue: currentVal,
       decoration: const InputDecoration(
           labelText: 'Raza',
           border: OutlineInputBorder(),

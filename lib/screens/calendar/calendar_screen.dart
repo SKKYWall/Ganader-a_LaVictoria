@@ -69,61 +69,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     return _allEvents[day] ?? [];
   }
 
-  // Helper para obtener eventos de una semana específica
-  List<CalendarEvent> _getEventsForWeek(DateTime weekFocusedDay) {
-    List<CalendarEvent> weekEvents = [];
-    DateTime startOfWeek = weekFocusedDay.subtract(
-      Duration(days: weekFocusedDay.weekday - 1),
-    ); // Lunes de la semana
-    DateTime endOfWeek = startOfWeek.add(
-      const Duration(days: 6),
-    ); // Domingo de la semana
-
-    DateTime currentDay = startOfWeek;
-    while (currentDay.isBefore(endOfWeek.add(const Duration(days: 1)))) {
-      weekEvents.addAll(_getEventsForDay(currentDay));
-      currentDay = currentDay.add(const Duration(days: 1));
-    }
-    // Ordenar eventos por fecha y luego por título
-    weekEvents.sort((a, b) {
-      int dateComparison = a.date.compareTo(b.date);
-      if (dateComparison != 0) {
-        return dateComparison;
-      }
-      return a.title.compareTo(b.title);
-    });
-    return weekEvents;
-  }
-
-  // Helper para obtener eventos de un mes específico (incluye mes actual o próximo)
-  List<CalendarEvent> _getEventsForMonth(DateTime monthFocusedDay) {
-    List<CalendarEvent> monthEvents = [];
-    DateTime startOfMonth = DateTime.utc(
-      monthFocusedDay.year,
-      monthFocusedDay.month,
-      1,
-    );
-    DateTime endOfMonth = DateTime.utc(
-      monthFocusedDay.year,
-      monthFocusedDay.month + 1,
-      0,
-    ); // Último día del mes
-
-    DateTime currentDay = startOfMonth;
-    while (currentDay.isBefore(endOfMonth.add(const Duration(days: 1)))) {
-      monthEvents.addAll(_getEventsForDay(currentDay));
-      currentDay = currentDay.add(const Duration(days: 1));
-    }
-    // Ordenar eventos por fecha y luego por título
-    monthEvents.sort((a, b) {
-      int dateComparison = a.date.compareTo(b.date);
-      if (dateComparison != 0) {
-        return dateComparison;
-      }
-      return a.title.compareTo(b.title);
-    });
-    return monthEvents;
-  }
 
   // Función para cargar los eventos desde Firestore
   Future<void> _loadEvents() async {

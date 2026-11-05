@@ -109,8 +109,11 @@ class _EstadisticasScreenState extends State<EstadisticasScreen> {
 
         // Sexo
         final sex = data['sex'] as String? ?? '';
-        if (sex == 'Hembra') h++;
-        else if (sex == 'Macho') m++;
+        if (sex == 'Hembra') {
+          h++;
+        } else if (sex == 'Macho') {
+          m++;
+        }
 
         // Gestación
         if (data['isPregnant'] == true) g++;

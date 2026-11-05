@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
 
 class SanidadScreen extends StatefulWidget {
@@ -62,8 +61,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
           await _firestore.collection('users').doc(_currentUser!.uid).get();
       if (mounted) {
         setState(() {
-          _currentRanchId =
-              (doc.data() as Map<String, dynamic>?)?['currentRanchId'];
+          _currentRanchId = doc.data()?['currentRanchId'];
           _isLoadingRanch = false;
         });
       }
@@ -318,13 +316,15 @@ class _SanidadScreenState extends State<SanidadScreen> {
         body: StreamBuilder<QuerySnapshot>(
           stream: _getAllAnimals(),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting)
+            if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
                   child: CircularProgressIndicator(color: Colors.teal));
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
               return const Center(
                   child: Text('No tienes animales registrados.',
                       style: TextStyle(color: Colors.grey)));
+            }
 
             final allDocs = snapshot.data!.docs;
             List<DocumentSnapshot> quarantinedDocs = [];
@@ -419,7 +419,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
                     children: [
                       DropdownButtonFormField<String>(
                         isExpanded: true,
-                        value: _selectedType,
+                        initialValue: _selectedType,
                         decoration: InputDecoration(
                             labelText: 'Tipo de Tratamiento',
                             border: OutlineInputBorder(
@@ -496,11 +496,12 @@ class _SanidadScreenState extends State<SanidadScreen> {
                     ),
                     TextButton.icon(
                       onPressed: () => setState(() {
-                        if (_selectedAnimals.length == filteredDocs.length)
+                        if (_selectedAnimals.length == filteredDocs.length) {
                           _selectedAnimals.clear();
-                        else
+                        } else {
                           _selectedAnimals =
                               filteredDocs.map((d) => d.id).toSet();
+                        }
                       }),
                       icon: Icon(
                           _selectedAnimals.length == filteredDocs.length &&
@@ -588,10 +589,11 @@ class _SanidadScreenState extends State<SanidadScreen> {
   }
 
   Widget _buildQuarantineTab(List<DocumentSnapshot> quarantinedDocs) {
-    if (quarantinedDocs.isEmpty)
+    if (quarantinedDocs.isEmpty) {
       return const Center(
           child: Text('¡Excelente! No hay animales en periodo de retiro.',
               style: TextStyle(color: Colors.grey, fontSize: 16)));
+    }
     return ListView.builder(
       padding: const EdgeInsets.all(16.0),
       itemCount: quarantinedDocs.length,

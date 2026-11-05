@@ -9,7 +9,7 @@ import 'package:manual_ganadero_flutter/widgets/voice_action_dialog.dart';
 enum VoiceState { waitingWakeWord, listening, processing, confirming }
 
 class LiveVoiceDialog extends StatefulWidget {
-  const LiveVoiceDialog({Key? key}) : super(key: key);
+  const LiveVoiceDialog({super.key});
 
   static void show(BuildContext context) {
     showModalBottomSheet(
@@ -142,8 +142,10 @@ class _LiveVoiceDialogState extends State<LiveVoiceDialog>
         }
       },
       localeId: 'es-MX',
-      listenMode: stt.ListenMode.search,
-      partialResults: true,
+      listenOptions: stt.SpeechListenOptions(
+        listenMode: stt.ListenMode.search,
+        partialResults: true,
+      ),
     );
   }
 
@@ -183,8 +185,10 @@ class _LiveVoiceDialogState extends State<LiveVoiceDialog>
         }
       },
       localeId: 'es-MX',
-      listenMode: stt.ListenMode.dictation,
-      partialResults: true,
+      listenOptions: stt.SpeechListenOptions(
+        listenMode: stt.ListenMode.dictation,
+        partialResults: true,
+      ),
       pauseFor: const Duration(seconds: 4),
     );
   }
@@ -260,9 +264,11 @@ class _LiveVoiceDialogState extends State<LiveVoiceDialog>
         }
       },
       localeId: 'es-MX',
-      listenMode: stt.ListenMode
-          .search, // FIX #4: search en lugar del inexistente confirmation
-      partialResults: false, // FIX #3: solo resultado final
+      listenOptions: stt.SpeechListenOptions(
+        listenMode: stt.ListenMode
+            .search, // FIX #4: search en lugar del inexistente confirmation
+        partialResults: false, // FIX #3: solo resultado final
+      ),
       pauseFor: const Duration(seconds: 10),
     );
   }
@@ -423,7 +429,7 @@ class _LiveVoiceDialogState extends State<LiveVoiceDialog>
                         _isConfirmationActive = false;
                         await _speech.stop();
                         await _speak('Guardando información.');
-                        if (!mounted) return;
+                        if (!context.mounted) return;
                         Navigator.of(context).pop();
                         await VoiceActionDialog.showConfirmationModal(
                             context, _pendingData!, _transcribedCommand,
@@ -445,7 +451,8 @@ class _LiveVoiceDialogState extends State<LiveVoiceDialog>
                         _isConfirmationActive = false;
                         await _speech.stop();
                         await _speak('Cancelado.');
-                        if (mounted) Navigator.of(context).pop();
+                        if (!context.mounted) return;
+                        Navigator.of(context).pop();
                       },
                     ),
                   ),

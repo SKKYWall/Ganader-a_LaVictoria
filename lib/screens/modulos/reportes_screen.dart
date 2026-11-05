@@ -1,6 +1,4 @@
 import 'dart:io';
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
 import 'package:firebase_auth/firebase_auth.dart';
@@ -14,7 +12,6 @@ import 'package:share_plus/share_plus.dart';
 
 // Modelos
 import 'package:manual_ganadero_flutter/models/animal.dart';
-import 'package:manual_ganadero_flutter/models/transaction.dart';
 
 class ReportesScreen extends StatefulWidget {
   const ReportesScreen({super.key});
@@ -46,7 +43,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       if (userDoc.exists && mounted) {
         setState(() {
           // Leer de forma segura
-          final data = userDoc.data() as Map<String, dynamic>?;
+          final data = userDoc.data();
           _currentRanchId = data?['currentRanchId'];
           _isLoadingRanch = false;
         });
@@ -127,8 +124,10 @@ class _ReportesScreenState extends State<ReportesScreen> {
         await file.writeAsString(csvContent);
 
         // Compartir el archivo
-        await Share.shareXFiles([XFile(path)],
-            text: 'Aquí tienes el $title exportado.');
+        await SharePlus.instance.share(ShareParams(
+          files: [XFile(path)],
+          text: 'Aquí tienes el $title exportado.',
+        ));
       }
     } catch (e) {
       _showErrorSnackBar('Error al exportar: $e');
@@ -160,8 +159,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       List<List<dynamic>> rows = animals
           .map((a) => [
                 a.earTagNumber,
-                a.legNumber ??
-                    'N/A', // <-- Asegúrate de que legNumber exista en tu modelo
+                a.legNumber,
                 a.name,
                 a.sex ?? 'N/A',
                 a.breed ?? 'N/A',
@@ -228,7 +226,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
             : 'N/A';
         return [
           a.earTagNumber,
-          a.legNumber ?? 'N/A',
+          a.legNumber,
           a.name,
           a.breed ?? 'N/A',
           estado,
@@ -282,7 +280,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
         double canalEst = ultimoPeso * 0.58;
         return [
           a.earTagNumber,
-          a.legNumber ?? '-',
+          a.legNumber,
           a.name,
           a.breed ?? '-',
           a.purpose ?? 'N/A',
@@ -336,7 +334,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
         }
         return [
           a.earTagNumber,
-          a.legNumber ?? '-',
+          a.legNumber,
           a.name,
           a.breed ?? '-',
           estado,
@@ -382,7 +380,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       List<List<dynamic>> rows = animals
           .map((a) => [
                 a.earTagNumber,
-                a.legNumber ?? '-',
+                a.legNumber,
                 a.name,
                 a.breed ?? 'N/A',
                 a.father ?? 'N/A',
@@ -434,7 +432,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
         }
         return [
           a.earTagNumber,
-          a.legNumber ?? '-',
+          a.legNumber,
           a.name,
           a.breed ?? '-',
           ultimaVacuna,

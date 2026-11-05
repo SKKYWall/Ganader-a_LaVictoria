@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:manual_ganadero_flutter/models/product.dart';
 import 'package:intl/intl.dart'; // Para formatear fechas
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 class AddEditProductScreen extends StatefulWidget {
@@ -201,6 +200,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
           .get();
       final currentRanchId = userDoc.data()?['currentRanchId'];
 
+      if (!mounted) return;
       if (currentRanchId == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -534,7 +534,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 8.0),
       child: DropdownButtonFormField<T>(
-        value: value,
+        initialValue: value,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),

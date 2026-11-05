@@ -316,8 +316,9 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
       if (!mounted) return;
       _showSnackBar('Error al registrar animal: ${e.toString()}');
     } finally {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -429,7 +430,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                 offset: const Offset(0, 3))
           ]),
       child: DropdownButtonFormField<String>(
-        value: value,
+        initialValue: value,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
@@ -533,7 +534,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                                       fontSize: 16,
                                       color: Colors.green),
                                 ),
-                                const SizedBox(height: 3),
+                                SizedBox(height: 3),
                                 Text(
                                   'Ahorra tiempo y súbelos desde Excel',
                                   style: TextStyle(
@@ -838,11 +839,12 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                                 onChanged: (bool value) {
                                   setState(() {
                                     _isPregnant = value;
-                                    if (!value)
+                                    if (!value) {
                                       _pregnancyDateController.clear();
+                                    }
                                   });
                                 },
-                                activeColor: const Color(0xFF6b4226),
+                                activeThumbColor: const Color(0xFF6b4226),
                               ),
                               if (_isPregnant)
                                 _buildFancyDateFormField(

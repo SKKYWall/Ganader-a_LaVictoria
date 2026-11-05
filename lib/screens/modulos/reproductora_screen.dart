@@ -19,7 +19,6 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
   final User? _currentUser = FirebaseAuth.instance.currentUser;
 
   String? _currentRanchId;
-  bool _isLoadingRanch = true;
 
   @override
   void initState() {
@@ -35,19 +34,18 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
       if (mounted) {
         setState(() {
           _currentRanchId = userDoc.data()?['currentRanchId'];
-          _isLoadingRanch = false;
         });
       }
     } catch (e) {
       debugPrint("Error cargando rancho: $e");
-      if (mounted) setState(() => _isLoadingRanch = false);
     }
   }
 
   // Obtenemos TODAS las hembras para poder filtrar localmente las preñadas y las reproductoras
   Stream<QuerySnapshot> _getHembras() {
-    if (_currentUser == null || _currentRanchId == null)
+    if (_currentUser == null || _currentRanchId == null) {
       return const Stream.empty();
+    }
     return _firestore
         .collection('users')
         .doc(_currentUser!.uid)
@@ -133,10 +131,11 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
             );
           }
         }
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('¡Preñez agendada!'),
               backgroundColor: Colors.pink));
+        }
       } catch (e) {
         debugPrint("Error: $e");
       }
@@ -204,10 +203,11 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
                   await NotificationService()
                       .cancelNotification(animal.id.hashCode);
 
-                  if (mounted)
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                         content: Text('¡Parto registrado!'),
                         backgroundColor: Colors.green));
+                  }
                 } catch (e) {
                   debugPrint("Error: $e");
                 }
@@ -255,13 +255,15 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
         body: StreamBuilder<QuerySnapshot>(
           stream: _getHembras(),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting)
+            if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
                   child: CircularProgressIndicator(color: Color(0xFF6b4226)));
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
               return const Center(
                   child: Text('No tienes hembras registradas.',
                       style: TextStyle(color: Colors.grey)));
+            }
 
             // Obtenemos todas las hembras
             final allHembras = snapshot.data!.docs

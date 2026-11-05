@@ -251,45 +251,39 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
                 CrossAxisAlignment.stretch, // Consistent stretch
             children: [
               // Selector de Tipo de Transacción (estilo similar a radio buttons en el otro form)
-              Row(
-                children: [
-                  Expanded(
-                    child: RadioListTile<String>(
-                      title: const Text('Ingreso',
-                          style: TextStyle(
-                              color: Color(0xFF5e3a1c),
-                              fontWeight: FontWeight.bold)), // Bold text
-                      value: 'income',
-                      groupValue: _transactionType,
-                      onChanged: (String? value) {
-                        setState(() {
-                          _transactionType = value!;
-                          _selectedCategory = null; // Reset category
-                          _selectedSubCategory = null; // Reset subcategory
-                        });
-                      },
-                      activeColor: Colors.green, // Color para ingreso
+              RadioGroup<String>(
+                groupValue: _transactionType,
+                onChanged: (String? value) {
+                  setState(() {
+                    _transactionType = value!;
+                    _selectedCategory = null; // Reset category
+                    _selectedSubCategory = null; // Reset subcategory
+                  });
+                },
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: const Text('Ingreso',
+                            style: TextStyle(
+                                color: Color(0xFF5e3a1c),
+                                fontWeight: FontWeight.bold)), // Bold text
+                        value: 'income',
+                        activeColor: Colors.green, // Color para ingreso
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: RadioListTile<String>(
-                      title: const Text('Egreso',
-                          style: TextStyle(
-                              color: Color(0xFF5e3a1c),
-                              fontWeight: FontWeight.bold)), // Bold text
-                      value: 'expense',
-                      groupValue: _transactionType,
-                      onChanged: (String? value) {
-                        setState(() {
-                          _transactionType = value!;
-                          _selectedCategory = null; // Reset category
-                          _selectedSubCategory = null; // Reset subcategory
-                        });
-                      },
-                      activeColor: Colors.red, // Color para egreso
+                    Expanded(
+                      child: RadioListTile<String>(
+                        title: const Text('Egreso',
+                            style: TextStyle(
+                                color: Color(0xFF5e3a1c),
+                                fontWeight: FontWeight.bold)), // Bold text
+                        value: 'expense',
+                        activeColor: Colors.red, // Color para egreso
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               // No SizedBox after each, as Padding in _buildTextField/DropdownFormField will handle vertical spacing
 
@@ -442,7 +436,7 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 8.0),
       child: DropdownButtonFormField<T>(
-        value: value,
+        initialValue: value,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon,

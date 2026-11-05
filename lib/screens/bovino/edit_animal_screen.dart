@@ -18,7 +18,7 @@ class EditAnimalScreen extends StatefulWidget {
   const EditAnimalScreen({super.key, required this.animalId});
 
   @override
-  _EditAnimalScreenState createState() => _EditAnimalScreenState();
+  State<EditAnimalScreen> createState() => _EditAnimalScreenState();
 }
 
 class _EditAnimalScreenState extends State<EditAnimalScreen> {
@@ -147,7 +147,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
         setState(() {
           _nameController.text = animal.name;
           _earTagNumberController.text = animal.earTagNumber;
-          _legNumberController.text = animal.legNumber ?? '';
+          _legNumberController.text = animal.legNumber;
           _registrationNumberController.text = animal.registrationNumber ?? '';
           if (animal.sex != null && ['Macho', 'Hembra'].contains(animal.sex)) {
             _selectedSex = animal.sex;
@@ -166,9 +166,10 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
           } else {
             _selectedPurpose = 'Reproductora'; // Valor por defecto seguro
           }
-          if (animal.birthDate != null)
+          if (animal.birthDate != null) {
             _birthDateController.text =
                 DateFormat('dd/MM/yyyy').format(animal.birthDate!);
+          }
           _birthWeightController.text = animal.birthWeight?.toString() ?? '';
           _weaningWeightController.text =
               animal.weaningWeight?.toString() ?? '';
@@ -373,10 +374,11 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
           }
         }
       } catch (e) {
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text('Error al actualizar: $e'),
               backgroundColor: Colors.red));
+        }
       } finally {
         if (mounted) setState(() => _loading = false);
       }
@@ -496,7 +498,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                 offset: const Offset(0, 3))
           ]),
       child: DropdownButtonFormField<String>(
-        value: value,
+        initialValue: value,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: const Color(0xFF5e3a1c)),
@@ -517,11 +519,12 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading)
+    if (_loading) {
       return const Scaffold(
           backgroundColor: Color(0xFFfbf6ec),
           body: Center(
               child: CircularProgressIndicator(color: Color(0xFF6b4226))));
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFfbf6ec),
@@ -670,8 +673,9 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                             onChanged: (val) {
                               setState(() {
                                 _selectedSex = val;
-                                if (_selectedSex == 'Macho')
+                                if (_selectedSex == 'Macho') {
                                   _isPregnant = false;
+                                }
                               });
                             },
                             validator: (value) =>
@@ -815,7 +819,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                                         fontWeight: FontWeight.bold,
                                         color: Color(0xFF5e3a1c))),
                                 value: _isPregnant,
-                                activeColor: const Color(0xFF6b4226),
+                                activeThumbColor: const Color(0xFF6b4226),
                                 onChanged: (val) =>
                                     setState(() => _isPregnant = val),
                               ),

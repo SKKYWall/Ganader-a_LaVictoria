@@ -80,8 +80,7 @@ class _SelectAnimalToPublishScreenState
         .get();
     if (mounted) {
       setState(() {
-        _currentRanchId =
-            (doc.data() as Map<String, dynamic>?)?['currentRanchId'];
+        _currentRanchId = doc.data()?['currentRanchId'];
         _isLoadingRanch = false;
       });
     }
@@ -500,7 +499,7 @@ class _SelectAnimalToPublishScreenState
                                   horizontal: 5, vertical: 15),
                             ),
                             isExpanded: true,
-                            value: _selectedState,
+                            initialValue: _selectedState,
                             items: _states
                                 .map((s) => DropdownMenuItem(
                                     value: s,

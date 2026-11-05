@@ -84,25 +84,31 @@ class _RagEngine {
     final intents = <String>{};
     switch (mode) {
       case 'Veterinario':
-        if (_matches(q, ['vacun', 'inmuniz', 'dosis', 'refuerzo']))
+        if (_matches(q, ['vacun', 'inmuniz', 'dosis', 'refuerzo'])) {
           intents.add('vaccinations');
+        }
         if (_matches(
-            q, ['enferm', 'síntom', 'diagnos', 'trata', 'medic', 'antibiótic']))
+            q, ['enferm', 'síntom', 'diagnos', 'trata', 'medic', 'antibiótic'])) {
           intents.add('health');
+        }
         if (_matches(q, ['retiro', 'carencia'])) intents.add('withdrawal');
-        if (_matches(q, ['preña', 'embaraz', 'parto', 'gestac']))
+        if (_matches(q, ['preña', 'embaraz', 'parto', 'gestac'])) {
           intents.add('pregnancy');
+        }
         break;
       case 'Genética':
-        if (_matches(q, ['padre', 'madre', 'linea', 'cruza', 'semen', 'toro']))
+        if (_matches(q, ['padre', 'madre', 'linea', 'cruza', 'semen', 'toro'])) {
           intents.add('lineage');
-        if (_matches(q, ['marcador', 'genétic', 'dna', 'hereda']))
+        }
+        if (_matches(q, ['marcador', 'genétic', 'dna', 'hereda'])) {
           intents.add('genetics');
+        }
         if (_matches(q, ['raza', 'fenotip'])) intents.add('breed');
         break;
       case 'Nutrición':
-        if (_matches(q, ['peso', 'kg', 'kilogram', 'crecer', 'ganancia']))
+        if (_matches(q, ['peso', 'kg', 'kilogram', 'crecer', 'ganancia'])) {
           intents.add('weight');
+        }
         if (_matches(q, [
           'dieta',
           'ración',
@@ -110,19 +116,25 @@ class _RagEngine {
           'forraje',
           'suplemento',
           'mineral'
-        ])) intents.add('diet');
-        if (_matches(q, ['preña', 'lactanc', 'leche']))
+        ])) {
+          intents.add('diet');
+        }
+        if (_matches(q, ['preña', 'lactanc', 'leche'])) {
           intents.add('reproductive_nutrition');
+        }
         break;
       default:
         intents.add('summary');
-        if (_matches(q, ['event', 'calend', 'próxim', 'agenda']))
+        if (_matches(q, ['event', 'calend', 'próxim', 'agenda'])) {
           intents.add('events');
+        }
     }
-    if (_matches(q, ['todos', 'hato', 'rancho', 'rebaño', 'ganado']))
+    if (_matches(q, ['todos', 'hato', 'rancho', 'rebaño', 'ganado'])) {
       intents.add('herd_summary');
-    if (_matches(q, ['event', 'calend', 'próxim', 'agenda']))
+    }
+    if (_matches(q, ['event', 'calend', 'próxim', 'agenda'])) {
       intents.add('events');
+    }
     if (intents.isEmpty) intents.add('summary');
     return intents;
   }
@@ -154,8 +166,9 @@ class _RagEngine {
         final months = now.difference(a.birthDate!).inDays ~/ 30;
         buf.writeln('Edad:${months}m (${fmt.format(a.birthDate!)})');
       }
-      if (a.location.isNotEmpty && a.location != 'N/A')
+      if (a.location.isNotEmpty && a.location != 'N/A') {
         buf.writeln('Ubicación:${a.location}');
+      }
       if (a.purpose != null) buf.writeln('Propósito:${a.purpose}');
 
       if (intents.contains('vaccinations') || mode == 'Veterinario') {
@@ -176,8 +189,9 @@ class _RagEngine {
           buf.writeln(
               'Retiro medicamento:${fmt.format(a.withdrawalDate!)} (${left > 0 ? "faltan ${left}d" : "VENCIDO"})');
         }
-        if (a.diseaseResistance != null)
+        if (a.diseaseResistance != null) {
           buf.writeln('Resistencia:${a.diseaseResistance}');
+        }
       }
 
       if (intents.contains('pregnancy') ||
@@ -199,20 +213,23 @@ class _RagEngine {
 
       if (intents.contains('weight') || intents.contains('diet')) {
         if (a.birthWeight != null) buf.writeln('Peso nacer:${a.birthWeight}kg');
-        if (a.weaningWeight != null)
+        if (a.weaningWeight != null) {
           buf.writeln('Peso destete:${a.weaningWeight}kg');
+        }
         if (a.stats.isNotEmpty) {
           final recent = a.stats.length > 3
               ? a.stats.sublist(a.stats.length - 3)
               : a.stats;
           buf.writeln('Historial peso:');
-          for (final s in recent)
+          for (final s in recent) {
             buf.writeln('  ${fmt.format(s.date)}:${s.value}kg');
+          }
           if (recent.length >= 2) {
             final gain = recent.last.value - recent.first.value;
             final days = recent.last.date.difference(recent.first.date).inDays;
-            if (days > 0)
+            if (days > 0) {
               buf.writeln('  GDP:${(gain / days).toStringAsFixed(3)}kg/d');
+            }
           }
         }
       }
@@ -222,14 +239,17 @@ class _RagEngine {
           intents.contains('breed')) {
         if (a.father != null) buf.writeln('Padre:${a.father}');
         if (a.mother != null) buf.writeln('Madre:${a.mother}');
-        if (a.geneticMarkers != null)
+        if (a.geneticMarkers != null) {
           buf.writeln('Marcadores:${a.geneticMarkers}');
-        if (a.fertilityInfo != null)
+        }
+        if (a.fertilityInfo != null) {
           buf.writeln('Fertilidad:${a.fertilityInfo}');
+        }
       }
 
-      if (a.description != null && a.description!.isNotEmpty)
+      if (a.description != null && a.description!.isNotEmpty) {
         buf.writeln('Notas:${a.description}');
+      }
     } else {
       if (intents.contains('herd_summary') || intents.contains('summary')) {
         final machos = allAnimals.where((a) => a.sex == 'Macho').length;
@@ -248,8 +268,9 @@ class _RagEngine {
         if (intents.contains('vaccinations')) {
           relevant = allAnimals
               .where((a) {
-                if (a.vaccinations == null || a.vaccinations!.isEmpty)
+                if (a.vaccinations == null || a.vaccinations!.isEmpty) {
                   return true;
+                }
                 final last = a.vaccinations!
                     .map((v) => v.date)
                     .reduce((a, b) => a.isAfter(b) ? a : b);
@@ -331,10 +352,11 @@ class _RagEngine {
           if (a.father != null) buf.write('|padre:${a.father}');
           if (a.geneticMarkers != null) buf.write('|gen:${a.geneticMarkers}');
         } else if (mode == 'Nutrición') {
-          if (a.stats.isNotEmpty)
+          if (a.stats.isNotEmpty) {
             buf.write('|peso:${a.stats.last.value}kg');
-          else if (a.weaningWeight != null)
+          } else if (a.weaningWeight != null) {
             buf.write('|destete:${a.weaningWeight}kg');
+          }
         }
         buf.writeln();
       }
@@ -568,8 +590,7 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
           .collection('users')
           .doc(user.uid)
           .get();
-      final ranchId = (userDoc.data()
-          as Map<String, dynamic>?)?['currentRanchId'] as String?;
+      final ranchId = userDoc.data()?['currentRanchId'] as String?;
       if (ranchId == null) {
         setState(() => _isLoadingContext = false);
         return;
@@ -687,8 +708,9 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
 
   Future<void> _sendMessage() async {
     final text = _textController.text.trim();
-    if (text.isEmpty && _selectedImage == null && _documentContent == null)
+    if (text.isEmpty && _selectedImage == null && _documentContent == null) {
       return;
+    }
 
     // ── VERIFICAR CUOTA ANTES DE ENVIAR ──────────────────────────────────
     // Si la cuota aún está cargando, esperar y re-verificar
@@ -930,16 +952,18 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
           _documentContent = content;
           _documentName = result.files.single.name;
         });
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text('Documento "$_documentName" cargado.'),
               backgroundColor: Colors.green));
+        }
       }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('No se pudo leer el archivo.'),
             backgroundColor: Colors.red));
+      }
     }
   }
 

@@ -77,15 +77,25 @@ class _GeneticaScreenState extends State<GeneticaScreen>
   int _calculateMeatStars(Animal animal) {
     double score = 0;
     if (animal.weaningWeight != null) {
-      if (animal.weaningWeight! >= 220) score += 5;
-      else if (animal.weaningWeight! >= 180) score += 4;
-      else if (animal.weaningWeight! >= 150) score += 3;
-      else score += 2;
+      if (animal.weaningWeight! >= 220) {
+        score += 5;
+      } else if (animal.weaningWeight! >= 180) {
+        score += 4;
+      } else if (animal.weaningWeight! >= 150) {
+        score += 3;
+      } else {
+        score += 2;
+      }
     } else if (animal.birthWeight != null) {
-      if (animal.birthWeight! >= 40) score += 5;
-      else if (animal.birthWeight! >= 35) score += 4;
-      else if (animal.birthWeight! >= 30) score += 3;
-      else score += 2;
+      if (animal.birthWeight! >= 40) {
+        score += 5;
+      } else if (animal.birthWeight! >= 35) {
+        score += 4;
+      } else if (animal.birthWeight! >= 30) {
+        score += 3;
+      } else {
+        score += 2;
+      }
     } else {
       return 0;
     }

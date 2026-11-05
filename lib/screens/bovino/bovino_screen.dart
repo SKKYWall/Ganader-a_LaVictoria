@@ -1,7 +1,6 @@
 // lib/screens/bovino_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/register_animal_screen.dart';
@@ -10,8 +9,6 @@ import 'package:manual_ganadero_flutter/screens/bovino/edit_animal_screen.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:intl/intl.dart'; // Para formatear fechas
 import 'package:manual_ganadero_flutter/services/notification_service.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:manual_ganadero_flutter/widgets/voice_action_dialog.dart'; // Ajusta la ruta a donde lo hayas creado
 import 'package:manual_ganadero_flutter/widgets/live_voice_dialog.dart'; // <-- AGREGAR ESTO
 
 class BovinoScreen extends StatefulWidget {
@@ -209,6 +206,8 @@ class _BovinoScreenState extends State<BovinoScreen> {
       );
       return; // Salir si hay un error al verificar
     }
+
+    if (!mounted) return;
 
     String confirmationMessage =
         '¿Estás seguro de que quieres eliminar este animal? Esta acción no se puede deshacer.';
