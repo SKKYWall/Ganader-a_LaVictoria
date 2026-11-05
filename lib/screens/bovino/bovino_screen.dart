@@ -11,6 +11,7 @@ import 'package:intl/intl.dart'; // Para formatear fechas
 import 'package:manual_ganadero_flutter/services/notification_service.dart';
 import 'package:manual_ganadero_flutter/widgets/live_voice_dialog.dart'; // <-- AGREGAR ESTO
 import 'package:manual_ganadero_flutter/widgets/animal_exit_dialog.dart';
+import 'package:manual_ganadero_flutter/core/life_stage.dart';
 
 class BovinoScreen extends StatefulWidget {
   const BovinoScreen({super.key});
@@ -93,12 +94,10 @@ class _BovinoScreenState extends State<BovinoScreen> {
       query = query.where('sex', isEqualTo: _selectedFilter);
       debugPrint('Filtro por sexo: $_selectedFilter');
     }
-
-    if (_selectedFilter == 'Joven') {
-      debugPrint('Filtro por edad: Joven');
-    } else if (_selectedFilter == 'Adulto') {
-      debugPrint('Filtro por edad: Adulto');
-    }
+    // El filtro por categoría de edad (Ternero/Novillo/Adulto) se calcula
+    // desde birthDate en memoria (ver build()) — Firestore no puede
+    // filtrar por una edad derivada sin guardarla como campo aparte, y
+    // guardarla arriesgaría que quede desactualizada.
 
     switch (_selectedOrder) {
       case 'name_asc':
@@ -249,8 +248,15 @@ class _BovinoScreenState extends State<BovinoScreen> {
                         value: 'Macho', child: Text('Machos')),
                     const PopupMenuItem<String>(
                         value: 'Hembra', child: Text('Hembras')),
-                    // const PopupMenuItem<String>(value: 'Joven', child: Text('Jóvenes (<2 años)')),
-                    // const PopupMenuItem<String>(value: 'Adulto', child: Text('Adultos (>=2 años)')),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem<String>(
+                        value: 'Ternero',
+                        child: Text('Terneros/as (< 1 año)')),
+                    const PopupMenuItem<String>(
+                        value: 'Novillo',
+                        child: Text('Novillos/Vaquillas (1-2 años)')),
+                    const PopupMenuItem<String>(
+                        value: 'Adulto', child: Text('Adultos (> 2 años)')),
                   ],
                 ),
                 PopupMenuButton<String>(
@@ -352,10 +358,18 @@ class _BovinoScreenState extends State<BovinoScreen> {
 
                           final wantedStatus =
                               _showArchived ? 'inactivo' : 'activo';
+                          const lifeStageFilters = {
+                            'Ternero': LifeStage.ternero,
+                            'Novillo': LifeStage.novillo,
+                            'Adulto': LifeStage.adulto,
+                          };
+                          final wantedStage = lifeStageFilters[_selectedFilter];
                           final animals = snapshot.data!.docs
                               .map((doc) => Animal.fromFirestore(
                                   doc.data() as Map<String, dynamic>, doc.id))
                               .where((a) => a.status == wantedStatus)
+                              .where((a) => wantedStage == null ||
+                                  computeLifeStage(a) == wantedStage)
                               .toList();
 
                           if (animals.isEmpty) {
