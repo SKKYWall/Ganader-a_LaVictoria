@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart'; // Para obtener el UID del us
 import 'package:manual_ganadero_flutter/models/animal.dart'; // ¡Importa tu modelo de Animal!
 import 'package:intl/intl.dart'; // Para formatear fechas
 import 'package:manual_ganadero_flutter/screens/bovino/edit_animal_screen.dart'; // Asegúrate de importar tu EditAnimalScreen
+import 'package:manual_ganadero_flutter/screens/bovino/register_animal_screen.dart';
 import 'package:firebase_storage/firebase_storage.dart'; // Importar para Firebase Storage para eliminar imagen
 import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 
@@ -773,6 +774,22 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
         ),
         centerTitle: true,
         actions: [
+          if (_animal!.sex == 'Hembra')
+            IconButton(
+              icon: const Icon(Icons.child_care, color: Colors.green),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => RegisterAnimalScreen(
+                      initialMotherEarTag: _animal!.earTagNumber,
+                      initialBreed: _animal!.breed,
+                      initialPurpose: _animal!.purpose,
+                    ),
+                  ),
+                );
+              },
+              tooltip: 'Registrar cría de esta madre',
+            ),
           IconButton(
             icon: const Icon(Icons.edit, color: Color(0xFFc99450)),
             onPressed: () async {

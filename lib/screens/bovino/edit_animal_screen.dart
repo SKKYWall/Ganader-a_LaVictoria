@@ -11,6 +11,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/services/notification_service.dart';
+import 'package:manual_ganadero_flutter/widgets/animal_parent_picker.dart';
 
 class EditAnimalScreen extends StatefulWidget {
   final String animalId;
@@ -34,8 +35,10 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
   final TextEditingController _weaningWeightController =
       TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _fatherController = TextEditingController();
-  final TextEditingController _motherController = TextEditingController();
+  String? _fatherEarTag;
+  String? _motherEarTag;
+  String? _currentRanchId;
+  String? _originalEarTagNumber;
   final TextEditingController _geneticMarkersController =
       TextEditingController();
   final TextEditingController _diseaseResistanceController =
@@ -103,8 +106,6 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
     _birthWeightController.dispose();
     _weaningWeightController.dispose();
     _descriptionController.dispose();
-    _fatherController.dispose();
-    _motherController.dispose();
     _geneticMarkersController.dispose();
     _diseaseResistanceController.dispose();
     _fertilityInfoController.dispose();
@@ -133,6 +134,8 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
         return;
       }
 
+      _currentRanchId = currentRanchId;
+
       final doc = await _firestore
           .collection('users')
           .doc(user.uid)
@@ -147,6 +150,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
         setState(() {
           _nameController.text = animal.name;
           _earTagNumberController.text = animal.earTagNumber;
+          _originalEarTagNumber = animal.earTagNumber;
           _legNumberController.text = animal.legNumber;
           _registrationNumberController.text = animal.registrationNumber ?? '';
           if (animal.sex != null && ['Macho', 'Hembra'].contains(animal.sex)) {
@@ -174,8 +178,8 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
           _weaningWeightController.text =
               animal.weaningWeight?.toString() ?? '';
           _descriptionController.text = animal.description ?? '';
-          _fatherController.text = animal.father ?? '';
-          _motherController.text = animal.mother ?? '';
+          _fatherEarTag = animal.father;
+          _motherEarTag = animal.mother;
           _geneticMarkersController.text = animal.geneticMarkers ?? '';
           _diseaseResistanceController.text = animal.diseaseResistance ?? '';
           _fertilityInfoController.text = animal.fertilityInfo ?? '';
@@ -302,8 +306,8 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
             'weaningWeight': double.tryParse(_weaningWeightController.text),
             'description': _descriptionController.text.trim(),
             'profileImageUrl': imageUrl,
-            'father': _fatherController.text.trim(),
-            'mother': _motherController.text.trim(),
+            'father': _fatherEarTag,
+            'mother': _motherEarTag,
             'geneticMarkers': _geneticMarkersController.text.trim(),
             'diseaseResistance': _diseaseResistanceController.text.trim(),
             'fertilityInfo': _fertilityInfoController.text.trim(),
@@ -315,8 +319,7 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
 
           DocumentSnapshot userDoc =
               await _firestore.collection('users').doc(user.uid).get();
-          String? currentRanchId =
-              (userDoc.data() as Map<String, dynamic>?)?['currentRanchId'];
+          final currentRanchId = _currentRanchId;
 
           if (currentRanchId == null) {
             if (mounted) {
@@ -327,14 +330,59 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
             return;
           }
 
-          await _firestore
+          final animalsRef = _firestore
               .collection('users')
               .doc(user.uid)
               .collection('ranches')
               .doc(currentRanchId)
-              .collection('animals')
-              .doc(widget.animalId)
-              .update(updateData);
+              .collection('animals');
+
+          final newEarTag = _earTagNumberController.text.trim();
+          final oldEarTag = _originalEarTagNumber;
+          final earTagChanged = oldEarTag != null &&
+              oldEarTag.isNotEmpty &&
+              oldEarTag != 'N/A' &&
+              newEarTag != oldEarTag;
+
+          final batch = _firestore.batch();
+          batch.update(animalsRef.doc(widget.animalId), updateData);
+
+          if (earTagChanged) {
+            final fatherMatches =
+                await animalsRef.where('father', isEqualTo: oldEarTag).get();
+            final motherMatches =
+                await animalsRef.where('mother', isEqualTo: oldEarTag).get();
+            final affected = <String, QueryDocumentSnapshot>{};
+            for (final d in fatherMatches.docs) {
+              if (d.id != widget.animalId) affected[d.id] = d;
+            }
+            for (final d in motherMatches.docs) {
+              if (d.id != widget.animalId) affected[d.id] = d;
+            }
+
+            if (affected.isNotEmpty) {
+              if (!mounted) return;
+              final confirmed =
+                  await _confirmRetagDialog(affected.values.toList());
+              if (confirmed != true) {
+                if (mounted) setState(() => _loading = false);
+                return;
+              }
+              for (final d in affected.values) {
+                final childData = d.data() as Map<String, dynamic>;
+                final childUpdates = <String, dynamic>{};
+                if (childData['father'] == oldEarTag) {
+                  childUpdates['father'] = newEarTag;
+                }
+                if (childData['mother'] == oldEarTag) {
+                  childUpdates['mother'] = newEarTag;
+                }
+                batch.update(d.reference, childUpdates);
+              }
+            }
+          }
+
+          await batch.commit();
 
           if (isPregnantData && pregnancyDateData != null) {
             bool notificationsEnabled = (userDoc.data()
@@ -383,6 +431,39 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
         if (mounted) setState(() => _loading = false);
       }
     }
+  }
+
+  Future<bool?> _confirmRetagDialog(
+      List<QueryDocumentSnapshot> affected) async {
+    final names = affected.map((d) {
+      final data = d.data() as Map<String, dynamic>;
+      return data['name']?.toString() ?? 'Sin nombre';
+    }).join(', ');
+
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFfbf6ec),
+        title: const Text('Actualizar arete en animales ligados',
+            style: TextStyle(color: Color(0xFF5e3a1c))),
+        content: Text(
+            '${affected.length} animal(es) tienen a este como padre/madre: '
+            '$names.\n\n¿Actualizar su referencia al arete nuevo?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF6b4226)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child:
+                const Text('Actualizar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSectionTitle(String title) {
@@ -751,16 +832,23 @@ class _EditAnimalScreenState extends State<EditAnimalScreen> {
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
                       children: [
-                        _buildFancyInputField(
-                            controller: _fatherController,
-                            label: 'Arete del Padre',
-                            maxLength: 15,
-                            icon: FontAwesomeIcons.person),
-                        _buildFancyInputField(
-                            controller: _motherController,
-                            label: 'Arete de la Madre',
-                            maxLength: 15,
-                            icon: FontAwesomeIcons.personDress),
+                        AnimalParentPicker(
+                          label: 'Padre (opcional)',
+                          sexFilter: 'Macho',
+                          currentRanchId: _currentRanchId,
+                          excludeAnimalId: widget.animalId,
+                          initialEarTag: _fatherEarTag,
+                          onChanged: (val) => _fatherEarTag = val,
+                        ),
+                        const SizedBox(height: 15),
+                        AnimalParentPicker(
+                          label: 'Madre',
+                          sexFilter: 'Hembra',
+                          currentRanchId: _currentRanchId,
+                          excludeAnimalId: widget.animalId,
+                          initialEarTag: _motherEarTag,
+                          onChanged: (val) => _motherEarTag = val,
+                        ),
                       ],
                     ),
                   ),

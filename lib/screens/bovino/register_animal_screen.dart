@@ -12,9 +12,19 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/import_animals_screen.dart'; // <-- AGREGA ESTO
 import 'package:manual_ganadero_flutter/services/notification_service.dart'; // Ajusta la ruta si es necesario
+import 'package:manual_ganadero_flutter/widgets/animal_parent_picker.dart';
 
 class RegisterAnimalScreen extends StatefulWidget {
-  const RegisterAnimalScreen({super.key});
+  final String? initialMotherEarTag;
+  final String? initialBreed;
+  final String? initialPurpose;
+
+  const RegisterAnimalScreen({
+    super.key,
+    this.initialMotherEarTag,
+    this.initialBreed,
+    this.initialPurpose,
+  });
 
   @override
   State<RegisterAnimalScreen> createState() => _RegisterAnimalScreenState();
@@ -35,8 +45,9 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
   final TextEditingController _birthWeightController = TextEditingController();
   final TextEditingController _weaningWeightController =
       TextEditingController();
-  final TextEditingController _fatherController = TextEditingController();
-  final TextEditingController _motherController = TextEditingController();
+  String? _fatherEarTag;
+  String? _motherEarTag;
+  String? _currentRanchId;
   final TextEditingController _diseaseResistanceController =
       TextEditingController();
   final TextEditingController _fertilityInfoController =
@@ -87,6 +98,34 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
   bool _isLoading = false;
 
   @override
+  void initState() {
+    super.initState();
+    _motherEarTag = widget.initialMotherEarTag;
+    if (widget.initialBreed != null && _bovineBreeds.contains(widget.initialBreed)) {
+      _selectedBreed = widget.initialBreed;
+    }
+    if (widget.initialPurpose != null && _purposes.contains(widget.initialPurpose)) {
+      _selectedPurpose = widget.initialPurpose;
+    }
+    _loadCurrentRanchId();
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    try {
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (mounted) {
+        setState(() {
+          _currentRanchId = userDoc.data()?['currentRanchId'];
+        });
+      }
+    } catch (e) {
+      debugPrint('Error al cargar rancho: $e');
+    }
+  }
+
+  @override
   void dispose() {
     _nameController.dispose();
     _registrationNumberController.dispose();
@@ -95,8 +134,6 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
     _birthDateController.dispose();
     _birthWeightController.dispose();
     _weaningWeightController.dispose();
-    _fatherController.dispose();
-    _motherController.dispose();
     _diseaseResistanceController.dispose();
     _fertilityInfoController.dispose();
     _geneticMarkersController.dispose();
@@ -232,12 +269,8 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
         weaningWeight: _weaningWeightController.text.trim().isEmpty
             ? null
             : double.tryParse(_weaningWeightController.text.trim()),
-        father: _fatherController.text.trim().isEmpty
-            ? null
-            : _fatherController.text.trim(),
-        mother: _motherController.text.trim().isEmpty
-            ? null
-            : _motherController.text.trim(),
+        father: _fatherEarTag,
+        mother: _motherEarTag,
         diseaseResistance: _diseaseResistanceController.text.trim().isEmpty
             ? null
             : _diseaseResistanceController.text.trim(),
@@ -767,16 +800,21 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
                       children: [
-                        _buildFancyInputField(
-                            controller: _fatherController,
-                            label: 'Arete del Padre',
-                            maxLength: 15,
-                            icon: FontAwesomeIcons.person),
-                        _buildFancyInputField(
-                            controller: _motherController,
-                            label: 'Arete de la Madre',
-                            maxLength: 15,
-                            icon: FontAwesomeIcons.personDress),
+                        AnimalParentPicker(
+                          label: 'Padre (opcional)',
+                          sexFilter: 'Macho',
+                          currentRanchId: _currentRanchId,
+                          initialEarTag: _fatherEarTag,
+                          onChanged: (val) => _fatherEarTag = val,
+                        ),
+                        const SizedBox(height: 15),
+                        AnimalParentPicker(
+                          label: 'Madre',
+                          sexFilter: 'Hembra',
+                          currentRanchId: _currentRanchId,
+                          initialEarTag: _motherEarTag,
+                          onChanged: (val) => _motherEarTag = val,
+                        ),
                       ],
                     ),
                   ),

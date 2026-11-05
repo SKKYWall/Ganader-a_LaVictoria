@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
+import 'package:manual_ganadero_flutter/screens/bovino/register_animal_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
@@ -143,6 +144,7 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
   }
 
   Future<void> _showCalvingDialog(Animal animal) async {
+    final screenContext = context;
     showDialog(
       context: context,
       builder: (context) {
@@ -205,8 +207,20 @@ class _ReproductoraScreenState extends State<ReproductoraScreen> {
 
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('¡Parto registrado!'),
+                        content: Text('¡Parto registrado! Registra a la cría.'),
                         backgroundColor: Colors.green));
+                  }
+
+                  if (screenContext.mounted) {
+                    Navigator.of(screenContext).push(
+                      MaterialPageRoute(
+                        builder: (_) => RegisterAnimalScreen(
+                          initialMotherEarTag: animal.earTagNumber,
+                          initialBreed: animal.breed,
+                          initialPurpose: animal.purpose,
+                        ),
+                      ),
+                    );
                   }
                 } catch (e) {
                   debugPrint("Error: $e");
