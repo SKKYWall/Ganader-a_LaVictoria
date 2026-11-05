@@ -6,6 +6,8 @@ import 'package:cloud_firestore/cloud_firestore.dart'
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:manual_ganadero_flutter/models/transaction.dart'; // Importa tu modelo Transaction
+import 'package:manual_ganadero_flutter/models/animal.dart';
+import 'package:manual_ganadero_flutter/core/finance_categories.dart';
 
 class AddEditTransactionScreen extends StatefulWidget {
   final Transaction? transaction; // Si es null, añadir; si no, editar
@@ -27,30 +29,8 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
   String? _selectedCategory;
   String? _selectedSubCategory;
   DateTime? _selectedDate;
-
-  // Definición de categorías y subcategorías
-  final Map<String, List<String>> _incomeCategories = {
-    'Venta de Animales': ['Bovinos', 'Ovinos / Caprinos', 'Cerdos'],
-    'Otros Ingresos': [
-      'Subsidios',
-      'Intereses',
-      'Venta de Productos Lácteos',
-      'Venta de Carne'
-    ],
-  };
-
-  final Map<String, List<String>> _expenseCategories = {
-    'Alimentación': ['Alimento balanceado', 'Forraje / silo', 'Suplementos'],
-    'Salud': ['Vacunas', 'Medicamentos', 'Material Médico'],
-    'Personal': ['Sueldos', 'Bonos'],
-    'Mantenimiento e Infraestructura': [
-      'Reparaciones',
-      'Nuevas construcciones',
-      'Herramientas'
-    ],
-    'Servicios': ['Luz', 'Agua', 'Internet', 'Combustible'],
-    'Otros Egresos': ['Seguros', 'Impuestos', 'Transporte', 'Gastos Bancarios'],
-  };
+  String? _selectedAnimalId;
+  String? _currentRanchId;
 
   @override
   void initState() {
@@ -62,10 +42,23 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
       _selectedCategory = widget.transaction!.category;
       _selectedSubCategory = widget.transaction!.subCategory;
       _selectedDate = widget.transaction!.date;
+      _selectedAnimalId = widget.transaction!.animalId;
       _dateController.text = DateFormat('dd/MM/yyyy').format(_selectedDate!);
     } else {
       _selectedDate = DateTime.now();
       _dateController.text = DateFormat('dd/MM/yyyy').format(_selectedDate!);
+    }
+    _loadCurrentRanchId();
+  }
+
+  Future<void> _loadCurrentRanchId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final userDoc =
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final ranchId = userDoc.data()?['currentRanchId'] as String?;
+    if (mounted) {
+      setState(() => _currentRanchId = ranchId);
     }
   }
 
@@ -79,15 +72,15 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
 
   List<String> _getCurrentCategories() {
     return _transactionType == 'income'
-        ? _incomeCategories.keys.toList()
-        : _expenseCategories.keys.toList();
+        ? incomeCategories.keys.toList()
+        : expenseCategories.keys.toList();
   }
 
   List<String> _getCurrentSubCategories(String category) {
     if (_transactionType == 'income') {
-      return _incomeCategories[category] ?? [];
+      return incomeCategories[category] ?? [];
     } else {
-      return _expenseCategories[category] ?? [];
+      return expenseCategories[category] ?? [];
     }
   }
 
@@ -151,6 +144,7 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
             ? _notesController.text.trim()
             : null,
         date: _selectedDate!,
+        animalId: _selectedAnimalId,
       ).toFirestore();
 
       if (widget.transaction == null) {
@@ -161,6 +155,12 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
           );
         }
       } else {
+        // Si se quitó la liga a un animal al editar, el animalId no aparece
+        // en transactionData (toFirestore lo omite si es null) — hay que
+        // borrarlo explícitamente o el campo anterior quedaría huérfano.
+        if (_selectedAnimalId == null && widget.transaction!.animalId != null) {
+          transactionData['animalId'] = FieldValue.delete();
+        }
         await transactionsCollection
             .doc(widget.transaction!.id)
             .update(transactionData);
@@ -298,8 +298,12 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
                   if (value == null || value.isEmpty) {
                     return 'Por favor ingresa el monto';
                   }
-                  if (double.tryParse(value) == null) {
+                  final parsed = double.tryParse(value);
+                  if (parsed == null) {
                     return 'Ingresa un número válido';
+                  }
+                  if (parsed <= 0) {
+                    return 'El monto debe ser mayor a cero';
                   }
                   return null;
                 },
@@ -337,6 +341,8 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
                   },
                   validator: null, // Subcategoría es opcional
                 ),
+
+              _buildAnimalPicker(),
 
               _buildTextField(
                 controller: _notesController,
@@ -385,6 +391,79 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Selector opcional para ligar el movimiento a un animal específico del
+  // hato activo (costeo/ingreso por animal). Null = "Ninguno".
+  Widget _buildAnimalPicker() {
+    if (_currentRanchId == null) return const SizedBox.shrink();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 8.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('ranches')
+            .doc(_currentRanchId)
+            .collection('animals')
+            .snapshots(),
+        builder: (context, snapshot) {
+          final docs = snapshot.data?.docs ?? [];
+          final animals = docs
+              .map((d) =>
+                  Animal.fromFirestore(d.data() as Map<String, dynamic>, d.id))
+              .where((a) => a.status == 'activo')
+              .toList();
+
+          // Si el animal ligado ya no está activo (p. ej. se vendió), se
+          // sigue mostrando como opción para no perder la referencia ya
+          // guardada en la transacción.
+          if (_selectedAnimalId != null &&
+              !animals.any((a) => a.id == _selectedAnimalId) &&
+              widget.transaction?.animalId == _selectedAnimalId) {
+            final existing = docs.where((d) => d.id == _selectedAnimalId);
+            if (existing.isNotEmpty) {
+              animals.add(Animal.fromFirestore(
+                  existing.first.data() as Map<String, dynamic>,
+                  existing.first.id));
+            }
+          }
+
+          return DropdownButtonFormField<String?>(
+            initialValue: _selectedAnimalId,
+            decoration: InputDecoration(
+              labelText: '¿Asociar a un animal? (Opcional)',
+              prefixIcon:
+                  const Icon(Icons.pets, color: Color(0xFF5e3a1c)),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 0),
+              labelStyle: const TextStyle(color: Color(0xFF5e3a1c)),
+              floatingLabelBehavior: FloatingLabelBehavior.never,
+              suffixIcon: const Icon(Icons.chevron_right, color: Colors.grey),
+            ),
+            icon: const SizedBox.shrink(),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('Ninguno',
+                    style: TextStyle(color: Colors.black87)),
+              ),
+              ...animals.map((a) => DropdownMenuItem<String?>(
+                    value: a.id,
+                    child: Text('${a.name} (${a.earTagNumber})',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.black87)),
+                  )),
+            ],
+            onChanged: (value) => setState(() => _selectedAnimalId = value),
+            style: const TextStyle(color: Colors.black87),
+          );
+        },
       ),
     );
   }

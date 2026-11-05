@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:manual_ganadero_flutter/models/transaction.dart';
 import 'package:manual_ganadero_flutter/screens/finance/add_edit_transaction_screen.dart';
+import 'package:manual_ganadero_flutter/core/finance_categories.dart';
 
 class TransactionHistoryScreen extends StatefulWidget {
   const TransactionHistoryScreen({super.key});
@@ -23,35 +24,12 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   int? _filterMonth;
   int? _filterYear;
 
-  final Map<String, List<String>> _incomeCategories = {
-    'Venta de Animales': ['Bovinos', 'Ovinos / Caprinos', 'Cerdos'],
-    'Otros Ingresos': [
-      'Subsidios',
-      'Intereses',
-      'Venta de Productos Lácteos',
-      'Venta de Carne'
-    ],
-  };
-
-  final Map<String, List<String>> _expenseCategories = {
-    'Alimentación': ['Alimento balanceado', 'Forraje / silo', 'Suplementos'],
-    'Salud': ['Vacunas', 'Medicamentos', 'Material Médico'],
-    'Personal': ['Sueldos', 'Bonos'],
-    'Mantenimiento e Infraestructura': [
-      'Reparaciones',
-      'Nuevas construcciones',
-      'Herramientas'
-    ],
-    'Servicios': ['Luz', 'Agua', 'Internet', 'Combustible'],
-    'Otros Egresos': ['Seguros', 'Impuestos', 'Transporte', 'Gastos Bancarios'],
-  };
-
   List<String> _getAllCategories() {
     final Set<String> categories = {};
-    for (var cat in _incomeCategories.keys) {
+    for (var cat in incomeCategories.keys) {
       categories.add(cat);
     }
-    for (var cat in _expenseCategories.keys) {
+    for (var cat in expenseCategories.keys) {
       categories.add(cat);
     }
     return categories.toList()..sort();
@@ -73,31 +51,23 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     return formatter.format(amount);
   }
 
-  // Modificado: Solo consultamos a Firebase por fecha para evitar problemas de índices.
+  // El filtro de mes/año se aplica en memoria (ver build) en vez de con
+  // where() de Firestore: así "Todos" en cualquiera de los dos dropdowns
+  // no depende de un índice compuesto ni de que el otro campo también esté
+  // fijo.
   Stream<QuerySnapshot> _getTransactionsStream(String ranchId) {
     if (_currentUser == null) {
       return const Stream.empty();
     }
 
-    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+    return FirebaseFirestore.instance
         .collection('users')
         .doc(_currentUser!.uid)
         .collection('ranches')
         .doc(ranchId)
         .collection('transactions')
-        .orderBy('date', descending: true);
-
-    if (_filterYear != null && _filterMonth != null) {
-      final startOfMonth = DateTime(_filterYear!, _filterMonth!, 1);
-      final endOfMonth =
-          DateTime(_filterYear!, _filterMonth! + 1, 0, 23, 59, 59);
-
-      query = query
-          .where('date', isGreaterThanOrEqualTo: startOfMonth)
-          .where('date', isLessThanOrEqualTo: endOfMonth);
-    }
-
-    return query.snapshots();
+        .orderBy('date', descending: true)
+        .snapshots();
   }
 
   @override
@@ -210,14 +180,20 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                         isExpanded: true,
                         initialValue: _filterMonth,
                         decoration: _inputDecoration('Mes'),
-                        items: List.generate(12, (index) => index + 1)
-                            .map((month) {
-                          return DropdownMenuItem(
-                            value: month,
-                            child: Text(monthNames[month - 1],
-                                overflow: TextOverflow.ellipsis),
-                          );
-                        }).toList(),
+                        items: [
+                          const DropdownMenuItem(
+                              value: null,
+                              child: Text('Todos',
+                                  overflow: TextOverflow.ellipsis)),
+                          ...List.generate(12, (index) => index + 1)
+                              .map((month) {
+                            return DropdownMenuItem(
+                              value: month,
+                              child: Text(monthNames[month - 1],
+                                  overflow: TextOverflow.ellipsis),
+                            );
+                          }),
+                        ],
                         onChanged: (value) {
                           setState(() {
                             _filterMonth = value;
@@ -231,13 +207,19 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                         isExpanded: true,
                         initialValue: _filterYear,
                         decoration: _inputDecoration('Año'),
-                        items: years.map((year) {
-                          return DropdownMenuItem(
-                            value: year,
-                            child: Text(year.toString(),
-                                overflow: TextOverflow.ellipsis),
-                          );
-                        }).toList(),
+                        items: [
+                          const DropdownMenuItem(
+                              value: null,
+                              child: Text('Todos',
+                                  overflow: TextOverflow.ellipsis)),
+                          ...years.map((year) {
+                            return DropdownMenuItem(
+                              value: year,
+                              child: Text(year.toString(),
+                                  overflow: TextOverflow.ellipsis),
+                            );
+                          }),
+                        ],
                         onChanged: (value) {
                           setState(() {
                             _filterYear = value;
@@ -315,6 +297,16 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                             .where((t) => t.category == _filterCategory)
                             .toList();
                       }
+                      if (_filterYear != null) {
+                        transactions = transactions
+                            .where((t) => t.date.year == _filterYear)
+                            .toList();
+                      }
+                      if (_filterMonth != null) {
+                        transactions = transactions
+                            .where((t) => t.date.month == _filterMonth)
+                            .toList();
+                      }
 
                       if (transactions.isEmpty) {
                         return const Center(
@@ -322,75 +314,123 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                                 'No se encontraron resultados con estos filtros.'));
                       }
 
-                      return ListView.builder(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16.0, vertical: 8.0),
-                        itemCount: transactions.length,
-                        itemBuilder: (context, index) {
-                          final transaction = transactions[index];
-                          return Card(
-                            elevation: 1,
-                            margin: const EdgeInsets.symmetric(vertical: 8.0),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
-                            color: Colors.white,
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: transaction.type == 'income'
-                                    ? Colors.green.withValues(alpha: 0.1)
-                                    : Colors.red.withValues(alpha: 0.1),
-                                child: Icon(
-                                  transaction.type == 'income'
-                                      ? Icons.arrow_downward
-                                      : Icons.arrow_upward,
-                                  color: transaction.type == 'income'
-                                      ? Colors.green
-                                      : Colors.red,
-                                ),
+                      double totalIncome = 0;
+                      double totalExpense = 0;
+                      for (final t in transactions) {
+                        if (t.type == 'income') {
+                          totalIncome += t.amount;
+                        } else {
+                          totalExpense += t.amount;
+                        }
+                      }
+
+                      return Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border:
+                                    Border.all(color: Colors.grey.shade300),
                               ),
-                              title: Text(
-                                transaction.category +
-                                    (transaction.subCategory != null
-                                        ? ' - ${transaction.subCategory}'
-                                        : ''),
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF5e3a1c)),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  _buildTotalColumn(
+                                      'Ingresos', totalIncome, Colors.green),
+                                  _buildTotalColumn(
+                                      'Egresos', totalExpense, Colors.red),
+                                  _buildTotalColumn(
+                                      'Balance',
+                                      totalIncome - totalExpense,
+                                      const Color(0xFF5e3a1c)),
+                                ],
                               ),
-                              subtitle: Text(
-                                '${DateFormat('dd MMM').format(transaction.date)} - ${transaction.notes ?? 'N/A'}',
-                                style: TextStyle(color: Colors.grey[600]),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: Text(
-                                _formatCurrency(transaction.amount),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                  color: transaction.type == 'income'
-                                      ? Colors.green
-                                      : Colors.red,
-                                ),
-                              ),
-                              onTap: () async {
-                                final result = await Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        AddEditTransactionScreen(
-                                            transaction: transaction),
+                            ),
+                          ),
+                          Expanded(
+                            child: ListView.builder(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0, vertical: 8.0),
+                              itemCount: transactions.length,
+                              itemBuilder: (context, index) {
+                                final transaction = transactions[index];
+                                return Card(
+                                  elevation: 1,
+                                  margin: const EdgeInsets.symmetric(
+                                      vertical: 8.0),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                  color: Colors.white,
+                                  child: ListTile(
+                                    leading: CircleAvatar(
+                                      backgroundColor:
+                                          transaction.type == 'income'
+                                              ? Colors.green
+                                                  .withValues(alpha: 0.1)
+                                              : Colors.red
+                                                  .withValues(alpha: 0.1),
+                                      child: Icon(
+                                        transaction.type == 'income'
+                                            ? Icons.arrow_downward
+                                            : Icons.arrow_upward,
+                                        color: transaction.type == 'income'
+                                            ? Colors.green
+                                            : Colors.red,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      transaction.category +
+                                          (transaction.subCategory != null
+                                              ? ' - ${transaction.subCategory}'
+                                              : ''),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF5e3a1c)),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    subtitle: Text(
+                                      '${DateFormat('dd MMM').format(transaction.date)} - ${transaction.notes ?? 'N/A'}',
+                                      style:
+                                          TextStyle(color: Colors.grey[600]),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    trailing: Text(
+                                      _formatCurrency(transaction.amount),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: transaction.type == 'income'
+                                            ? Colors.green
+                                            : Colors.red,
+                                      ),
+                                    ),
+                                    onTap: () async {
+                                      final result = await Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              AddEditTransactionScreen(
+                                                  transaction: transaction),
+                                        ),
+                                      );
+                                      if (result == true) {
+                                        setState(() {});
+                                      }
+                                    },
                                   ),
                                 );
-                                if (result == true) {
-                                  setState(() {});
-                                }
                               },
                             ),
-                          );
-                        },
+                          ),
+                        ],
                       );
                     },
                   );
@@ -398,6 +438,19 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTotalColumn(String label, double amount, Color color) {
+    return Column(
+      children: [
+        Text(label,
+            style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(height: 2),
+        Text(_formatCurrency(amount),
+            style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+      ],
     );
   }
 

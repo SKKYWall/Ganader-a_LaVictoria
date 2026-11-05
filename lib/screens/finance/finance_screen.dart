@@ -8,6 +8,7 @@ import 'package:manual_ganadero_flutter/models/transaction.dart';
 import 'package:manual_ganadero_flutter/screens/finance/add_edit_transaction_screen.dart';
 import 'package:manual_ganadero_flutter/screens/finance/transaction_history_screen.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:manual_ganadero_flutter/core/finance_categories.dart';
 
 class FinanceScreen extends StatefulWidget {
   const FinanceScreen({super.key});
@@ -155,15 +156,27 @@ class _FinanceScreenState extends State<FinanceScreen> {
 
                           double monthlyIncome = 0;
                           double monthlyExpense = 0;
+                          double perAnimalExpense = 0;
 
                           for (var t in currentMonthTransactions) {
                             if (t.type == 'income') monthlyIncome += t.amount;
-                            if (t.type == 'expense') monthlyExpense += t.amount;
+                            if (t.type == 'expense') {
+                              monthlyExpense += t.amount;
+                              // Solo alimentación y salud son gasto
+                              // directamente atribuible a mantener un
+                              // animal — el resto (personal, servicios,
+                              // mantenimiento de infraestructura, etc.) no
+                              // escala con el número de cabezas.
+                              if (perAnimalExpenseCategories
+                                  .contains(t.category)) {
+                                perAnimalExpense += t.amount;
+                              }
+                            }
                           }
                           double balance = monthlyIncome - monthlyExpense;
 
                           double costPerHead = totalAnimals > 0
-                              ? (monthlyExpense / totalAnimals)
+                              ? (perAnimalExpense / totalAnimals)
                               : 0;
 
                           return CustomScrollView(
@@ -297,14 +310,14 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                                     CrossAxisAlignment.start,
                                                 children: [
                                                   const Text(
-                                                      'Costo de Mantenimiento',
+                                                      'Alimentación y Salud por Cabeza',
                                                       style: TextStyle(
                                                           fontWeight:
                                                               FontWeight.bold,
                                                           color:
                                                               Colors.black87)),
                                                   Text(
-                                                      'Gasto promedio por cada animal este mes ($totalAnimals cabezas)',
+                                                      'Gasto de alimentación y salud este mes, dividido entre $totalAnimals cabezas activas',
                                                       style: const TextStyle(
                                                           fontSize: 11,
                                                           color: Colors.grey)),

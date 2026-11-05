@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 
 // Modelos
 import 'package:manual_ganadero_flutter/models/animal.dart';
+import 'package:manual_ganadero_flutter/models/transaction.dart';
 
 class ReportesScreen extends StatefulWidget {
   const ReportesScreen({super.key});
@@ -62,6 +63,15 @@ class _ReportesScreenState extends State<ReportesScreen> {
         .collection('ranches')
         .doc(_currentRanchId)
         .collection('animals');
+  }
+
+  CollectionReference get _transactionsRef {
+    return _firestore
+        .collection('users')
+        .doc(_currentUser!.uid)
+        .collection('ranches')
+        .doc(_currentRanchId)
+        .collection('transactions');
   }
 
   // ==========================================
@@ -453,6 +463,70 @@ class _ReportesScreenState extends State<ReportesScreen> {
     }
   }
 
+  // ==========================================
+  // 7. REPORTE FINANCIERO
+  // ==========================================
+  Future<void> _generateFinancialReport(bool asPdf) async {
+    setState(() => _isGenerating = true);
+    try {
+      final snapshot =
+          await _transactionsRef.orderBy('date', descending: true).get();
+      final transactions = snapshot.docs
+          .map((doc) =>
+              Transaction.fromFirestore(doc.data() as Map<String, dynamic>, doc.id))
+          .toList();
+
+      List<String> headers = [
+        'Fecha',
+        'Tipo',
+        'Categoría',
+        'Subcategoría',
+        'Monto',
+        'Notas'
+      ];
+      List<List<dynamic>> rows = transactions
+          .map((t) => [
+                DateFormat('dd/MM/yyyy').format(t.date),
+                t.type == 'income' ? 'Ingreso' : 'Egreso',
+                t.category,
+                t.subCategory ?? '-',
+                currencyFormat.format(t.amount),
+                t.notes ?? '-',
+              ])
+          .toList();
+
+      double totalIncome = 0;
+      double totalExpense = 0;
+      for (final t in transactions) {
+        if (t.type == 'income') {
+          totalIncome += t.amount;
+        } else {
+          totalExpense += t.amount;
+        }
+      }
+      rows.add(['', '', '', 'Total Ingresos', currencyFormat.format(totalIncome), '']);
+      rows.add(['', '', '', 'Total Egresos', currencyFormat.format(totalExpense), '']);
+      rows.add([
+        '',
+        '',
+        '',
+        'Balance',
+        currencyFormat.format(totalIncome - totalExpense),
+        ''
+      ]);
+
+      await _exportData(
+          title: 'Reporte Financiero',
+          headers: headers,
+          data: rows,
+          asPdf: asPdf);
+    } catch (e) {
+      _showErrorSnackBar('Error al generar reporte financiero: $e');
+    } finally {
+      setState(() => _isGenerating = false);
+    }
+  }
+
   // --- Helper para Headers de PDF ---
   pw.Widget _buildPdfHeader(String title) {
     return pw.Column(
@@ -636,6 +710,15 @@ class _ReportesScreenState extends State<ReportesScreen> {
                     color: Colors.teal,
                     onTap: () =>
                         _showExportOptionsDialog(_generateSanidadReport),
+                  ),
+                  _buildReportCard(
+                    title: 'Financiero',
+                    description:
+                        'Historial completo de ingresos y egresos, con totales.',
+                    icon: FontAwesomeIcons.moneyBillWave,
+                    color: Colors.green,
+                    onTap: () =>
+                        _showExportOptionsDialog(_generateFinancialReport),
                   ),
                   const SizedBox(height: 40),
                 ],
