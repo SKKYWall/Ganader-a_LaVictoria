@@ -26,6 +26,97 @@ class VaccineRecord {
   }
 }
 
+// Registro de un servicio reproductivo (monta natural o inseminación
+// artificial) y su seguimiento hasta el parto. `pregnancyDate`/`isPregnant`
+// en Animal siguen siendo la fuente de verdad para "¿está preñada ahora?"
+// (los usa toda la app) — este registro es el historial detallado de CÓMO
+// se logró esa preñez, para poder calcular indicadores reales a futuro
+// (% por tipo de servicio, intervalo entre partos, etc.) en vez de solo
+// saber el estado actual.
+class ReproductiveEvent {
+  final String serviceType; // 'Monta Natural' | 'Inseminación Artificial'
+  // earTag del semental si está en el sistema, o texto libre si es externo
+  // (pajilla, semental ajeno) — misma convención que Animal.father/mother.
+  final String? sireEarTag;
+  final DateTime serviceDate;
+  final bool? pregnancyConfirmed;
+  final DateTime? pregnancyCheckDate;
+  final String? outcome; // 'vivo' | 'muerto' | 'aborto' (null = pendiente)
+  final DateTime? outcomeDate;
+  final String? notes;
+
+  ReproductiveEvent({
+    required this.serviceType,
+    this.sireEarTag,
+    required this.serviceDate,
+    this.pregnancyConfirmed,
+    this.pregnancyCheckDate,
+    this.outcome,
+    this.outcomeDate,
+    this.notes,
+  });
+
+  bool get isOpen => outcome == null;
+
+  ReproductiveEvent copyWith({
+    bool? pregnancyConfirmed,
+    DateTime? pregnancyCheckDate,
+    String? outcome,
+    DateTime? outcomeDate,
+  }) {
+    return ReproductiveEvent(
+      serviceType: serviceType,
+      sireEarTag: sireEarTag,
+      serviceDate: serviceDate,
+      pregnancyConfirmed: pregnancyConfirmed ?? this.pregnancyConfirmed,
+      pregnancyCheckDate: pregnancyCheckDate ?? this.pregnancyCheckDate,
+      outcome: outcome ?? this.outcome,
+      outcomeDate: outcomeDate ?? this.outcomeDate,
+      notes: notes,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'serviceType': serviceType,
+      if (sireEarTag != null) 'sireEarTag': sireEarTag,
+      'serviceDate': Timestamp.fromDate(serviceDate),
+      if (pregnancyConfirmed != null) 'pregnancyConfirmed': pregnancyConfirmed,
+      if (pregnancyCheckDate != null)
+        'pregnancyCheckDate': Timestamp.fromDate(pregnancyCheckDate!),
+      if (outcome != null) 'outcome': outcome,
+      if (outcomeDate != null) 'outcomeDate': Timestamp.fromDate(outcomeDate!),
+      if (notes != null) 'notes': notes,
+    };
+  }
+
+  factory ReproductiveEvent.fromMap(Map<String, dynamic> map) {
+    DateTime parseDate(dynamic raw) {
+      if (raw is Timestamp) return raw.toDate();
+      if (raw is String) {
+        try {
+          return DateTime.parse(raw);
+        } catch (_) {}
+      }
+      return DateTime.now();
+    }
+
+    return ReproductiveEvent(
+      serviceType: map['serviceType'] as String? ?? 'Monta Natural',
+      sireEarTag: map['sireEarTag'] as String?,
+      serviceDate: parseDate(map['serviceDate']),
+      pregnancyConfirmed: map['pregnancyConfirmed'] as bool?,
+      pregnancyCheckDate: map['pregnancyCheckDate'] != null
+          ? parseDate(map['pregnancyCheckDate'])
+          : null,
+      outcome: map['outcome'] as String?,
+      outcomeDate:
+          map['outcomeDate'] != null ? parseDate(map['outcomeDate']) : null,
+      notes: map['notes'] as String?,
+    );
+  }
+}
+
 class Animal {
   final String id;
   final String name;
@@ -61,6 +152,11 @@ class Animal {
   final String? purpose;
   final DateTime? withdrawalDate; // Fecha de retiro por medicamentos
 
+  // Historial de servicios reproductivos (monta natural / IA) — ver
+  // ReproductiveEvent arriba. isPregnant/pregnancyDate siguen siendo la
+  // fuente de verdad del estado actual.
+  final List<ReproductiveEvent>? reproductiveEvents;
+
   // Ciclo de vida del animal. 'activo' si no se ha dado de baja.
   final String status; // 'activo' | 'inactivo'
   final String? exitReason; // 'vendido' | 'sacrificado' | 'muerto'
@@ -94,6 +190,7 @@ class Animal {
     this.vaccinations, // Añadido al constructor
     this.isPregnant, // Añadido al constructor
     this.pregnancyDate, // Añadido al constructor
+    this.reproductiveEvents,
     this.withdrawalDate,
     this.purpose,
     this.status = 'activo',
@@ -138,6 +235,15 @@ class Animal {
       parsedVaccinations = (data['vaccinations'] as List)
           .map((vaccineData) =>
               VaccineRecord.fromMap(vaccineData as Map<String, dynamic>))
+          .toList();
+    }
+
+    // Mapeo de historial reproductivo
+    List<ReproductiveEvent> parsedReproEvents = [];
+    if (data['reproductiveEvents'] is List) {
+      parsedReproEvents = (data['reproductiveEvents'] as List)
+          .map((eventData) =>
+              ReproductiveEvent.fromMap(eventData as Map<String, dynamic>))
           .toList();
     }
 
@@ -186,6 +292,8 @@ class Animal {
           : parsedVaccinations, // Guardar como null si está vacío
       isPregnant: data['isPregnant'] as bool?,
       pregnancyDate: parsedPregnancyDate,
+      reproductiveEvents:
+          parsedReproEvents.isEmpty ? null : parsedReproEvents,
 
       withdrawalDate: data['withdrawalDate'] != null
           ? (data['withdrawalDate'] as Timestamp).toDate()
@@ -235,6 +343,9 @@ class Animal {
       if (isPregnant != null) 'isPregnant': isPregnant,
       if (pregnancyDate != null)
         'pregnancyDate': Timestamp.fromDate(pregnancyDate!),
+      if (reproductiveEvents != null && reproductiveEvents!.isNotEmpty)
+        'reproductiveEvents':
+            reproductiveEvents!.map((e) => e.toMap()).toList(),
       if (purpose != null) 'purpose': purpose,
 
       if (withdrawalDate != null)

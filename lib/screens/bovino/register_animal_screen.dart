@@ -16,12 +16,14 @@ import 'package:manual_ganadero_flutter/widgets/animal_parent_picker.dart';
 
 class RegisterAnimalScreen extends StatefulWidget {
   final String? initialMotherEarTag;
+  final String? initialFatherEarTag;
   final String? initialBreed;
   final String? initialPurpose;
 
   const RegisterAnimalScreen({
     super.key,
     this.initialMotherEarTag,
+    this.initialFatherEarTag,
     this.initialBreed,
     this.initialPurpose,
   });
@@ -101,6 +103,7 @@ class _RegisterAnimalScreenState extends State<RegisterAnimalScreen> {
   void initState() {
     super.initState();
     _motherEarTag = widget.initialMotherEarTag;
+    _fatherEarTag = widget.initialFatherEarTag;
     if (widget.initialBreed != null && _bovineBreeds.contains(widget.initialBreed)) {
       _selectedBreed = widget.initialBreed;
     }

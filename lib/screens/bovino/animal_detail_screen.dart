@@ -11,6 +11,8 @@ import 'package:manual_ganadero_flutter/screens/bovino/register_animal_screen.da
 import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 import 'package:manual_ganadero_flutter/widgets/animal_exit_dialog.dart';
 import 'package:manual_ganadero_flutter/core/withdrawal_utils.dart';
+import 'package:manual_ganadero_flutter/core/reproductive_utils.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class AnimalDetailScreen extends StatefulWidget {
   final String animalId; // Recibimos el ID del animal
@@ -165,14 +167,11 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
     return weight != null ? '${weight.toStringAsFixed(1)} kg' : 'N/A';
   }
 
-  // Gestación bovina promedio (días) para estimar la fecha de parto.
-  static const int kGestationDays = 283;
-
   // Fecha estimada de parto a partir de la fecha de preñez.
   DateTime? get _expectedCalvingDate {
     final p = _animal?.pregnancyDate;
     if (p == null) return null;
-    return p.add(const Duration(days: kGestationDays));
+    return expectedCalvingDate(p);
   }
 
   // Fila de "Parto estimado" con días restantes y color según cercanía.
@@ -901,6 +900,94 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  if (_animal!.reproductiveEvents != null &&
+                      _animal!.reproductiveEvents!.isNotEmpty) ...[
+                    _buildSectionTitle('Historial Reproductivo'),
+                    Card(
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15)),
+                      color: Colors.white,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _animal!.reproductiveEvents!.length,
+                          itemBuilder: (context, index) {
+                            final events = _animal!.reproductiveEvents!
+                                .reversed
+                                .toList();
+                            final event = events[index];
+                            final outcomeLabel = switch (event.outcome) {
+                              'vivo' => 'Parto exitoso',
+                              'muerto' => 'Diagnóstico negativo',
+                              'aborto' => 'Aborto',
+                              _ => 'Pendiente',
+                            };
+                            final outcomeColor = switch (event.outcome) {
+                              'vivo' => Colors.green,
+                              'muerto' => Colors.grey,
+                              'aborto' => Colors.orange,
+                              _ => Colors.pink,
+                            };
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 6.0),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                      event.serviceType == 'Monta Natural'
+                                          ? FontAwesomeIcons.cow
+                                          : Icons.science,
+                                      color: const Color(0xFFc99450),
+                                      size: 20),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${event.serviceType}${event.sireEarTag != null ? ' — ${event.sireEarTag}' : ''}',
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF5e3a1c)),
+                                        ),
+                                        Text(
+                                          DateFormat('dd/MM/yyyy')
+                                              .format(event.serviceDate),
+                                          style: const TextStyle(
+                                              color: Colors.black87,
+                                              fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                        color: outcomeColor
+                                            .withValues(alpha: 0.1),
+                                        borderRadius:
+                                            BorderRadius.circular(6)),
+                                    child: Text(outcomeLabel,
+                                        style: TextStyle(
+                                            color: outcomeColor,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
                 ],
               ),
 

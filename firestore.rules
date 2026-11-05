@@ -54,7 +54,8 @@ service cloud.firestore {
           && strOk(data, 'exitNotes', 2000)
           && listOk(data, 'imageUrls', 30)
           && listOk(data, 'stats', 5000)
-          && listOk(data, 'vaccinations', 1000);
+          && listOk(data, 'vaccinations', 1000)
+          && listOk(data, 'reproductiveEvents', 500);
     }
 
     function productDataOk(data) {
