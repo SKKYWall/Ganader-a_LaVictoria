@@ -703,11 +703,22 @@ class _EngordaScreenState extends State<EngordaScreen> {
           child: Text('No hay animales en engorda.',
               style: TextStyle(color: Colors.grey)));
     }
+
+    // Ranking por ganancia diaria de peso (GDP) — quién va mejor y quién
+    // peor dentro del lote de engorda, no solo el peso absoluto.
+    final sortedIndexes = List<int>.from(indexes)
+      ..sort((a, b) {
+        final gdpA = _calcularGDP(allAnimals[a]) ?? double.negativeInfinity;
+        final gdpB = _calcularGDP(allAnimals[b]) ?? double.negativeInfinity;
+        return gdpB.compareTo(gdpA);
+      });
+    const medalColors = [Colors.amber, Colors.grey, Colors.brown];
+
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: indexes.length,
+      itemCount: sortedIndexes.length,
       itemBuilder: (context, i) {
-        int originalIndex = indexes[i];
+        int originalIndex = sortedIndexes[i];
         Animal animal = allAnimals[originalIndex];
         Map<String, dynamic> data = rawData[originalIndex];
 
@@ -719,6 +730,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
         double progreso =
             pesoMeta > 0 ? (ultimoPeso / pesoMeta).clamp(0.0, 1.0) : 0.0;
         bool llegoMeta = ultimoPeso >= pesoMeta && pesoMeta > 0;
+        final rank = i + 1;
 
         return Card(
           elevation: 2,
@@ -734,10 +746,34 @@ class _EngordaScreenState extends State<EngordaScreen> {
               children: [
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: CircleAvatar(
-                      backgroundColor: const Color(0xFFfbf6ec),
-                      child: const Icon(FontAwesomeIcons.cow,
-                          color: Color(0xFFc99450))),
+                  leading: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                          backgroundColor: const Color(0xFFfbf6ec),
+                          child: const Icon(FontAwesomeIcons.cow,
+                              color: Color(0xFFc99450))),
+                      if (gdp != null)
+                        Positioned(
+                          right: -4,
+                          top: -4,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: rank <= 3
+                                  ? medalColors[rank - 1]
+                                  : Colors.grey.shade300,
+                            ),
+                            child: Text('$rank',
+                                style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white)),
+                          ),
+                        ),
+                    ],
+                  ),
                   title: Text('${animal.name} (${animal.earTagNumber})',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 16)),

@@ -13,6 +13,8 @@ import 'package:manual_ganadero_flutter/widgets/animal_exit_dialog.dart';
 import 'package:manual_ganadero_flutter/core/withdrawal_utils.dart';
 import 'package:manual_ganadero_flutter/core/reproductive_utils.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:manual_ganadero_flutter/models/transaction.dart' as fin;
+import 'package:manual_ganadero_flutter/core/finance_categories.dart';
 
 class AnimalDetailScreen extends StatefulWidget {
   final String animalId; // Recibimos el ID del animal
@@ -26,6 +28,7 @@ class AnimalDetailScreen extends StatefulWidget {
 class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
   Animal? _animal;
   bool _isLoading = true;
+  String? _currentRanchId;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -69,6 +72,7 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
         setState(() => _isLoading = false);
         return;
       }
+      _currentRanchId = currentRanchId;
 
       _firestore
           .collection('users')
@@ -288,6 +292,68 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
           color: Color(0xFF5e3a1c),
         ),
       ),
+    );
+  }
+
+  // Suma los ingresos/egresos de Finanzas ya ligados a este animal
+  // (campo animalId en Transaction — ver add_edit_transaction_screen.dart
+  // y AnimalLifecycleService) para mostrar cuánto ha costado o generado.
+  Widget _buildAnimalCostCard() {
+    final user = _auth.currentUser;
+    if (user == null || _currentRanchId == null) {
+      return const SizedBox.shrink();
+    }
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('ranches')
+          .doc(_currentRanchId)
+          .collection('transactions')
+          .where('animalId', isEqualTo: widget.animalId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        double income = 0, expense = 0;
+        int count = 0;
+        if (snapshot.hasData) {
+          for (final doc in snapshot.data!.docs) {
+            final t = fin.Transaction.fromFirestore(
+                doc.data() as Map<String, dynamic>, doc.id);
+            if (t.type == 'income') {
+              income += t.amount;
+            } else {
+              expense += t.amount;
+            }
+            count++;
+          }
+        }
+        return Card(
+          elevation: 3,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          color: Colors.white,
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: count == 0
+                ? const Text(
+                    'Sin movimientos de Finanzas ligados a este animal. '
+                    'Puedes asociarlos al registrar o editar una transacción.',
+                    style: TextStyle(
+                        fontStyle: FontStyle.italic, color: Colors.grey))
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildDetailRow(
+                          'Ingresos ligados', formatCurrencyMXN(income)),
+                      _buildDetailRow(
+                          'Egresos ligados', formatCurrencyMXN(expense)),
+                      _buildDetailRow('Balance neto',
+                          formatCurrencyMXN(income - expense)),
+                    ],
+                  ),
+          ),
+        );
+      },
     );
   }
 
@@ -861,6 +927,13 @@ class _AnimalDetailScreenState extends State<AnimalDetailScreen> {
                       ),
               ),
             ),
+            const SizedBox(height: 20),
+
+            // Sección de Costos y Ventas ligados a este animal específico
+            // (requiere que las transacciones se liguen con animalId, ver
+            // add_edit_transaction_screen.dart y AnimalLifecycleService).
+            _buildSectionTitle('Costos y Ventas Ligados'),
+            _buildAnimalCostCard(),
             const SizedBox(height: 20),
 
             // Sección de Información de Reproducción (Preñez) - Solo si es Hembra (AÑADIDA)
