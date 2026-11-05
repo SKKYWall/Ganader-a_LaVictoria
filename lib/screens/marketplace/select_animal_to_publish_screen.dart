@@ -2,10 +2,12 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 
@@ -25,7 +27,9 @@ class _SelectAnimalToPublishScreenState
   final Map<String, Map<String, dynamic>> _selectedAnimalDetails = {};
   final Map<String, TextEditingController> _priceControllers = {};
 
-  final Map<String, File> _newAnimalImages = {};
+  final Map<String, List<File>> _newAnimalImages = {};
+  double? _latitude;
+  double? _longitude;
 
   final TextEditingController _certificationsController =
       TextEditingController();
@@ -61,6 +65,7 @@ class _SelectAnimalToPublishScreenState
   void initState() {
     super.initState();
     _loadCurrentRanchId();
+    _captureApproximateLocation();
   }
 
   @override
@@ -101,13 +106,38 @@ class _SelectAnimalToPublishScreenState
 
   Future<void> _pickImageForAnimal(String animalId) async {
     final ImagePicker picker = ImagePicker();
-    final XFile? image =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final List<XFile> images =
+        await picker.pickMultiImage(imageQuality: 80);
 
-    if (image != null) {
+    if (images.isNotEmpty) {
       setState(() {
-        _newAnimalImages[animalId] = File(image.path);
+        _newAnimalImages[animalId] = images.map((x) => File(x.path)).toList();
       });
+    }
+  }
+
+  // Captura la ubicación aproximada del rancho (no la dirección exacta) para
+  // mostrarla en el Marketplace. Redondeada a ~1km de precisión por
+  // privacidad. Si el usuario no da permiso, simplemente no se guarda.
+  Future<void> _captureApproximateLocation() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+      final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+      if (!mounted) return;
+      setState(() {
+        _latitude = double.parse(position.latitude.toStringAsFixed(2));
+        _longitude = double.parse(position.longitude.toStringAsFixed(2));
+      });
+    } catch (e) {
+      debugPrint('No se pudo obtener la ubicación aproximada: $e');
     }
   }
 
@@ -194,15 +224,14 @@ class _SelectAnimalToPublishScreenState
         final priceText = _priceControllers[animalId]?.text ?? '0';
         final price = double.tryParse(priceText) ?? 0.0;
 
-        String? finalImageUrl;
+        List<String> finalImageUrls;
 
         if (_newAnimalImages.containsKey(animalId)) {
-          finalImageUrl = await _uploadImage(_newAnimalImages[animalId]!);
+          final uploaded = await Future.wait(
+              _newAnimalImages[animalId]!.map((f) => _uploadImage(f)));
+          finalImageUrls = uploaded.whereType<String>().toList();
         } else {
-          List<dynamic> imageUrls = data['imageUrls'] ?? [];
-          if (imageUrls.isNotEmpty) {
-            finalImageUrl = imageUrls[0];
-          }
+          finalImageUrls = List<String>.from(data['imageUrls'] ?? const []);
         }
 
         final newListing = marketplaceRef.doc();
@@ -216,8 +245,10 @@ class _SelectAnimalToPublishScreenState
           'description': data['description'] ?? '',
           'locationState': _selectedState,
           'locationMunicipality': _municipalityController.text.trim(),
+          if (_latitude != null) 'latitude': _latitude,
+          if (_longitude != null) 'longitude': _longitude,
           'contactPhone': _phoneController.text.trim(),
-          'imageUrl': finalImageUrl,
+          'imageUrls': finalImageUrls,
           'breed': data['breed'] ?? 'Desconocida',
           'certifications': _certificationsController.text.trim(),
           'status': 'activo',
@@ -319,8 +350,10 @@ class _SelectAnimalToPublishScreenState
                     final bool blocked = isPublished || inWithdrawal;
 
                     Widget imageWidget;
-                    if (_newAnimalImages.containsKey(animalId)) {
-                      imageWidget = Image.file(_newAnimalImages[animalId]!,
+                    final pickedCount = _newAnimalImages[animalId]?.length ?? 0;
+                    if (pickedCount > 0) {
+                      imageWidget = Image.file(
+                          _newAnimalImages[animalId]!.first,
                           fit: BoxFit.cover);
                     } else if (data['imageUrls'] != null &&
                         (data['imageUrls'] as List).isNotEmpty) {
@@ -415,7 +448,25 @@ class _SelectAnimalToPublishScreenState
                                                 size: 12,
                                                 color: Color(0xFF6b4226)),
                                           ),
-                                        )
+                                        ),
+                                        if (pickedCount > 1)
+                                          Positioned(
+                                            top: 2,
+                                            left: 2,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                  horizontal: 4, vertical: 1),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF6b4226),
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              child: Text('+$pickedCount',
+                                                  style: const TextStyle(
+                                                      fontSize: 9,
+                                                      color: Colors.white)),
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ),
@@ -548,6 +599,7 @@ class _SelectAnimalToPublishScreenState
                       controller: _phoneController,
                       keyboardType: TextInputType.phone,
                       maxLength: 10,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: InputDecoration(
                         labelText: 'WhatsApp (10 dígitos)',
                         prefixIcon: const Icon(FontAwesomeIcons.whatsapp,

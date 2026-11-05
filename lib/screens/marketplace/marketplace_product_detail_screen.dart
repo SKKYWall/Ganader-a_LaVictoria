@@ -3,9 +3,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
+import 'package:manual_ganadero_flutter/services/animal_lifecycle_service.dart';
+import 'package:manual_ganadero_flutter/models/animal.dart';
 
 class MarketplaceProductDetailScreen extends StatefulWidget {
   final String listingId;
@@ -59,10 +62,15 @@ class _MarketplaceProductDetailScreenState
       return;
     }
 
+    // Antepone el código de país de México si el número no lo trae ya
+    // (los números se capturan como 10 dígitos locales).
+    final phoneWithCountryCode =
+        phone.toString().length == 10 ? '52$phone' : phone.toString();
+
     final message =
         "Hola, vi tu publicación de '$animalName' en Manual Ganadero y me interesa tener más información.";
-    final Uri whatsappUri =
-        Uri.parse("https://wa.me/$phone?text=${Uri.encodeComponent(message)}");
+    final Uri whatsappUri = Uri.parse(
+        "https://wa.me/$phoneWithCountryCode?text=${Uri.encodeComponent(message)}");
 
     try {
       await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
@@ -72,6 +80,99 @@ class _MarketplaceProductDetailScreenState
           content: Text(
               'No se pudo abrir WhatsApp. Intenta agregarlo manualmente.')));
     }
+  }
+
+  // Marca el animal como vendido (sin borrar el animal ni la publicación):
+  // AnimalLifecycleService actualiza el animal, crea el ingreso en Finanzas
+  // si se captura un precio, y pone este listing en status 'vendido'.
+  Future<void> _markAsSold() async {
+    final priceController = TextEditingController(
+        text: _listing?['price']?.toString() ?? '');
+
+    final confirmedPrice = await showDialog<double?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFfbf6ec),
+        title: const Text('Marcar como vendido'),
+        content: TextField(
+          controller: priceController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+              labelText: 'Precio final de venta (opcional)', prefixText: '\$ '),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6b4226)),
+            onPressed: () =>
+                Navigator.pop(ctx, double.tryParse(priceController.text.trim())),
+            child: const Text('Confirmar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+
+    final animalId = _listing?['animalId'];
+    final ownerId = _listing?['ownerId'];
+    final ranchId = _listing?['ranchId'];
+    if (animalId == null || ownerId == null || ranchId == null) return;
+
+    try {
+      final animalDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(ownerId)
+          .collection('ranches')
+          .doc(ranchId)
+          .collection('animals')
+          .doc(animalId)
+          .get();
+      if (!animalDoc.exists) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se encontró el animal original.')),
+        );
+        return;
+      }
+      final animal = Animal.fromFirestore(
+          animalDoc.data() as Map<String, dynamic>, animalDoc.id);
+
+      await AnimalLifecycleService.recordExit(
+        animal: animal,
+        userId: ownerId,
+        ranchId: ranchId,
+        reason: 'vendido',
+        date: DateTime.now(),
+        price: (confirmedPrice != null && confirmedPrice > 0)
+            ? confirmedPrice
+            : null,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('¡Marcado como vendido!')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al marcar como vendido: $e')),
+      );
+    }
+  }
+
+  String _formatVaccineDate(dynamic raw) {
+    DateTime? date;
+    if (raw is Timestamp) {
+      date = raw.toDate();
+    } else if (raw is String) {
+      date = DateTime.tryParse(raw);
+    }
+    if (date == null) return 'Fecha desconocida';
+    return 'Aplicada el: ${DateFormat('dd MMM yyyy', 'es_MX').format(date)}';
   }
 
   // Confirmación antes de borrar (Mejora de UX)
@@ -117,6 +218,22 @@ class _MarketplaceProductDetailScreenState
                   debugPrint('Error al desbloquear animal: $e');
                 }
               }
+
+              // Limpiar las fotos subidas para este listing (evita fuga de
+              // almacenamiento en Storage).
+              final listingImages = _listing?['imageUrls'] is List
+                  ? List<String>.from(_listing?['imageUrls'])
+                  : (_listing?['imageUrl'] != null
+                      ? [_listing!['imageUrl'] as String]
+                      : const <String>[]);
+              for (final url in listingImages) {
+                try {
+                  await FirebaseStorage.instance.refFromURL(url).delete();
+                } catch (e) {
+                  debugPrint('Advertencia: no se pudo borrar una foto del listing: $e');
+                }
+              }
+
               await FirebaseFirestore.instance
                   .collection('marketplace_listings')
                   .doc(widget.listingId)
@@ -160,14 +277,26 @@ class _MarketplaceProductDetailScreenState
     final purpose = listing['purpose'] ?? 'N/A';
     final birthWeight = listing['birthWeight'];
     final weaningWeight = listing['weaningWeight'];
-    final imageUrl = listing['imageUrl'];
+    // Compatibilidad: publicaciones viejas solo tienen 'imageUrl' (singular).
+    final List<String> imageUrls = listing['imageUrls'] is List
+        ? List<String>.from(listing['imageUrls'])
+        : (listing['imageUrl'] != null
+            ? [listing['imageUrl'] as String]
+            : const <String>[]);
     final certifications = listing['certifications'] ?? '';
     List<dynamic> vaccinations = listing['vaccinations'] ?? [];
+    final bool isSold = listing['status'] == 'vendido';
 
-    // Calcular Edad
+    // Calcular Edad — blindado contra fechas legadas en formato String.
     String ageText = 'Desconocida';
-    if (listing['birthDate'] != null) {
-      DateTime birthDate = (listing['birthDate'] as Timestamp).toDate();
+    final rawBirthDate = listing['birthDate'];
+    DateTime? birthDate;
+    if (rawBirthDate is Timestamp) {
+      birthDate = rawBirthDate.toDate();
+    } else if (rawBirthDate is String) {
+      birthDate = DateTime.tryParse(rawBirthDate);
+    }
+    if (birthDate != null) {
       int ageMonths = DateTime.now().difference(birthDate).inDays ~/ 30;
       if (ageMonths > 12) {
         ageText = '${ageMonths ~/ 12} años, ${ageMonths % 12} meses';
@@ -210,26 +339,53 @@ class _MarketplaceProductDetailScreenState
       ),
       body: Stack(
         children: [
-          // --- 1. IMAGEN DE FONDO (Fija) ---
+          // --- 1. CARRUSEL DE FOTOS ---
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             height: MediaQuery.of(context).size.height * 0.45,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                image: imageUrl != null && imageUrl.isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(imageUrl), fit: BoxFit.cover)
-                    : null,
-              ),
-              child: imageUrl == null || imageUrl.isEmpty
-                  ? const Center(
-                      child: Icon(FontAwesomeIcons.cow,
-                          size: 100, color: Colors.grey))
-                  : null,
-            ),
+            child: imageUrls.isEmpty
+                ? Container(
+                    color: Colors.grey[200],
+                    child: const Center(
+                        child: Icon(FontAwesomeIcons.cow,
+                            size: 100, color: Colors.grey)))
+                : Stack(
+                    children: [
+                      PageView.builder(
+                        itemCount: imageUrls.length,
+                        itemBuilder: (context, i) => Container(
+                          decoration: BoxDecoration(
+                            color: Colors.grey[200],
+                            image: DecorationImage(
+                                image: NetworkImage(imageUrls[i]),
+                                fit: BoxFit.cover),
+                          ),
+                        ),
+                      ),
+                      if (imageUrls.length > 1)
+                        Positioned(
+                          bottom: 12,
+                          left: 0,
+                          right: 0,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: List.generate(
+                              imageUrls.length,
+                              (i) => Container(
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 3),
+                                width: 6,
+                                height: 6,
+                                decoration: const BoxDecoration(
+                                    color: Colors.white, shape: BoxShape.circle),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
           ),
 
           // --- 2. CONTENIDO DESLIZABLE (Efecto Bottom Sheet) ---
@@ -272,7 +428,26 @@ class _MarketplaceProductDetailScreenState
                               ),
                             ),
                           ),
-                          if (isOwner)
+                          if (isSold)
+                            Container(
+                              margin: const EdgeInsets.only(left: 10),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                  color: Colors.red.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                      color: Colors.red.withValues(alpha: 0.5))),
+                              child: const Text(
+                                'VENDIDO',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            )
+                          else if (isOwner)
                             Container(
                               margin: const EdgeInsets.only(left: 10),
                               padding: const EdgeInsets.symmetric(
@@ -310,6 +485,21 @@ class _MarketplaceProductDetailScreenState
                           ),
                         ],
                       ),
+                      if (!isOwner &&
+                          (listing['contactPhone'] ?? '').toString().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              const Icon(FontAwesomeIcons.whatsapp,
+                                  size: 16, color: Colors.green),
+                              const SizedBox(width: 5),
+                              Text(listing['contactPhone'].toString(),
+                                  style: const TextStyle(
+                                      fontSize: 14, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
                       const SizedBox(height: 15),
 
                       // Precio (Destacado)
@@ -467,8 +657,7 @@ class _MarketplaceProductDetailScreenState
                                     style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 15)),
-                                subtitle: Text(
-                                    'Aplicada el: ${DateFormat('dd MMM yyyy', 'es_MX').format((vac['date'] as Timestamp).toDate())}'),
+                                subtitle: Text(_formatVaccineDate(vac['date'])),
                               ),
                             );
                           }).toList(),
@@ -486,33 +675,55 @@ class _MarketplaceProductDetailScreenState
         ],
       ),
 
-      // --- BOTÓN FLOTANTE INFERIOR (Solo si no es el dueño) ---
+      // --- BOTÓN FLOTANTE INFERIOR ---
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: isOwner
+      floatingActionButton: isSold
           ? null
-          : Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              child: SizedBox(
-                width: double.infinity,
-                height: 55,
-                child: FloatingActionButton.extended(
-                  onPressed: _contactSellerViaWhatsApp,
-                  elevation: 5,
-                  backgroundColor:
-                      const Color(0xFF25D366), // Color oficial de WhatsApp
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15)),
-                  icon: const Icon(FontAwesomeIcons.whatsapp,
-                      size: 24, color: Colors.white),
-                  label: const Text('Contactar al Vendedor',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 0.5)),
-                ),
-              ),
-            ),
+          : (isOwner
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: FloatingActionButton.extended(
+                      onPressed: _markAsSold,
+                      elevation: 5,
+                      backgroundColor: const Color(0xFF6b4226),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15)),
+                      icon: const Icon(Icons.sell, color: Colors.white),
+                      label: const Text('Marcar como vendido',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: 0.5)),
+                    ),
+                  ),
+                )
+              : Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: FloatingActionButton.extended(
+                      onPressed: _contactSellerViaWhatsApp,
+                      elevation: 5,
+                      backgroundColor:
+                          const Color(0xFF25D366), // Color oficial de WhatsApp
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15)),
+                      icon: const Icon(FontAwesomeIcons.whatsapp,
+                          size: 24, color: Colors.white),
+                      label: const Text('Contactar al Vendedor',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: 0.5)),
+                    ),
+                  ),
+                )),
     );
   }
 

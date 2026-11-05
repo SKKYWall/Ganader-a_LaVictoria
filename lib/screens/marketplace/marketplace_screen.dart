@@ -151,17 +151,30 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
 
               final searchTerm = _searchController.text.toLowerCase();
               final docs = snapshot.data!.docs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
                 if (isMyListings) return true;
-                final name = ((doc.data() as Map)['animalName'] ?? '')
-                    .toString()
-                    .toLowerCase();
-                final breed = ((doc.data() as Map)['breed'] ?? '')
-                    .toString()
-                    .toLowerCase();
+                // En Explorar solo se muestran publicaciones activas — lo
+                // vendido/pausado desaparece sin necesidad de borrarlo.
+                if ((data['status'] as String? ?? 'activo') != 'activo') {
+                  return false;
+                }
+                final name = (data['animalName'] ?? '').toString().toLowerCase();
+                final breed = (data['breed'] ?? '').toString().toLowerCase();
                 return name.contains(searchTerm) || breed.contains(searchTerm);
               }).toList();
 
-              if (docs.isEmpty) {
+              // Más recientes primero, tope de 50 para no cargar un catálogo
+              // ilimitado en memoria (sin depender de un índice compuesto de
+              // Firestore para orderBy + where).
+              docs.sort((a, b) {
+                final da = (a.data() as Map)['publishDate'];
+                final db = (b.data() as Map)['publishDate'];
+                if (da is! Timestamp || db is! Timestamp) return 0;
+                return db.compareTo(da);
+              });
+              final visibleDocs = docs.take(50).toList();
+
+              if (visibleDocs.isEmpty) {
                 return const Center(
                     child: Text('No se encontraron resultados.'));
               }
@@ -177,10 +190,11 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                       mainAxisSpacing: 10,
                       childAspectRatio: 0.70,
                     ),
-                    itemCount: docs.length,
+                    itemCount: visibleDocs.length,
                     itemBuilder: (context, index) {
-                      final data = docs[index].data() as Map<String, dynamic>;
-                      return _buildProductCard(docs[index].id, data);
+                      final data =
+                          visibleDocs[index].data() as Map<String, dynamic>;
+                      return _buildProductCard(visibleDocs[index].id, data);
                     },
                   );
                 },
@@ -211,7 +225,13 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     final municipality = data['locationMunicipality'] ?? '';
     final fullLocation =
         municipality.isNotEmpty ? '$municipality, $state' : state;
-    final imageUrl = data['imageUrl'];
+    final imageUrls = data['imageUrls'] is List
+        ? List<String>.from(data['imageUrls'])
+        : (data['imageUrl'] != null
+            ? [data['imageUrl'] as String]
+            : const <String>[]);
+    final imageUrl = imageUrls.isNotEmpty ? imageUrls.first : null;
+    final isSold = data['status'] == 'vendido';
 
     return GestureDetector(
       onTap: () {
@@ -228,14 +248,37 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: Container(
-                width: double.infinity,
-                color: Colors.grey[300],
-                child: imageUrl != null
-                    ? Image.network(imageUrl, fit: BoxFit.cover)
-                    // --- CAMBIO DE ICONO AQUÍ ---
-                    : const Icon(FontAwesomeIcons.cow,
-                        size: 50, color: Colors.grey),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    color: Colors.grey[300],
+                    child: imageUrl != null
+                        ? Image.network(imageUrl, fit: BoxFit.cover)
+                        // --- CAMBIO DE ICONO AQUÍ ---
+                        : const Icon(FontAwesomeIcons.cow,
+                            size: 50, color: Colors.grey),
+                  ),
+                  if (isSold)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.red[700],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('VENDIDO',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                ],
               ),
             ),
             Padding(
