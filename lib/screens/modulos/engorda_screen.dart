@@ -7,6 +7,7 @@ import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart
 import 'package:manual_ganadero_flutter/models/animal_stat.dart';
 import 'package:manual_ganadero_flutter/core/carcass_yield.dart';
 import 'package:manual_ganadero_flutter/services/animal_lifecycle_service.dart';
+import 'package:manual_ganadero_flutter/widgets/bulk_weight_dialog.dart';
 
 class EngordaScreen extends StatefulWidget {
   const EngordaScreen({super.key});
@@ -275,9 +276,8 @@ class _EngordaScreenState extends State<EngordaScreen> {
                         'birthWeight': animal.birthWeight,
                         'pesoVivoFinal': pesoVivo,
                         'pesoCanal': pesoCanal,
-                        'rendimientoReal': pesoVivo > 0
-                            ? pesoCanal / pesoVivo
-                            : null,
+                        'rendimientoReal':
+                            pesoVivo > 0 ? pesoCanal / pesoVivo : null,
                         'precioVenta': precioVenta,
                         'slaughterDate': Timestamp.now(),
                         'stats': animal.stats
@@ -299,16 +299,16 @@ class _EngordaScreenState extends State<EngordaScreen> {
                         reason: 'sacrificado',
                         date: DateTime.now(),
                         price: precioVenta,
-                        notes: 'Envío a rastro — ${pesoCanal.toStringAsFixed(1)} kg en canal',
+                        notes:
+                            'Envío a rastro — ${pesoCanal.toStringAsFixed(1)} kg en canal',
                       );
 
                       if (mounted) Navigator.pop(context);
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'Animal procesado. Historial guardado en registros de rastro.'),
-                                backgroundColor: Colors.green));
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text(
+                                'Animal procesado. Historial guardado en registros de rastro.'),
+                            backgroundColor: Colors.green));
                       }
                     } catch (e) {
                       if (mounted) Navigator.pop(context);
@@ -371,7 +371,8 @@ class _EngordaScreenState extends State<EngordaScreen> {
                                       fontSize: 20,
                                       fontWeight: FontWeight.bold,
                                       color: Color(0xFF5e3a1c))),
-                              Text('Procesar animal y darlo de baja del inventario',
+                              Text(
+                                  'Procesar animal y darlo de baja del inventario',
                                   style: TextStyle(
                                       fontSize: 13, color: Colors.grey))
                             ])),
@@ -427,8 +428,8 @@ class _EngordaScreenState extends State<EngordaScreen> {
                     if (errorText != null) ...[
                       const SizedBox(height: 10),
                       Text(errorText!,
-                          style: const TextStyle(
-                              color: Colors.red, fontSize: 13)),
+                          style:
+                              const TextStyle(color: Colors.red, fontSize: 13)),
                     ],
                     const SizedBox(height: 25),
                     SizedBox(
@@ -442,8 +443,8 @@ class _EngordaScreenState extends State<EngordaScreen> {
                         onPressed: () {
                           final pesoVivo =
                               double.tryParse(pesoVivoController.text.trim());
-                          final pesoCanal = double.tryParse(
-                              pesoCanalController.text.trim());
+                          final pesoCanal =
+                              double.tryParse(pesoCanalController.text.trim());
                           if (pesoVivo == null || pesoVivo <= 0) {
                             setStateModal(() => errorText =
                                 'Ingresa un peso vivo final válido (mayor a 0).');
@@ -454,12 +455,11 @@ class _EngordaScreenState extends State<EngordaScreen> {
                                 'Ingresa un peso en canal válido (mayor a 0).');
                             return;
                           }
-                          final precioVenta = precioVentaController.text
-                                  .trim()
-                                  .isNotEmpty
-                              ? double.tryParse(
-                                  precioVentaController.text.trim())
-                              : null;
+                          final precioVenta =
+                              precioVentaController.text.trim().isNotEmpty
+                                  ? double.tryParse(
+                                      precioVentaController.text.trim())
+                                  : null;
                           Navigator.pop(ctx);
                           _confirmarEnvioRastro(
                               animal, pesoVivo, pesoCanal, precioVenta);
@@ -568,8 +568,7 @@ class _EngordaScreenState extends State<EngordaScreen> {
                                 borderRadius: BorderRadius.circular(10))),
                         onPressed: () async {
                           if (weightController.text.isEmpty) return;
-                          final weight =
-                              double.tryParse(weightController.text);
+                          final weight = double.tryParse(weightController.text);
                           if (weight == null || weight <= 0) return;
                           Navigator.pop(ctx);
                           await _firestore
@@ -713,186 +712,228 @@ class _EngordaScreenState extends State<EngordaScreen> {
         return gdpB.compareTo(gdpA);
       });
     const medalColors = [Colors.amber, Colors.grey, Colors.brown];
+    final engordaAnimals = sortedIndexes.map((i) => allAnimals[i]).toList();
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: sortedIndexes.length,
-      itemBuilder: (context, i) {
-        int originalIndex = sortedIndexes[i];
-        Animal animal = allAnimals[originalIndex];
-        Map<String, dynamic> data = rawData[originalIndex];
-
-        // Leemos la meta específica (500.0 por defecto si no existe)
-        double pesoMeta = (data['targetWeight'] as num?)?.toDouble() ?? 500.0;
-
-        double ultimoPeso = _getUltimoPeso(animal);
-        double? gdp = _calcularGDP(animal);
-        double progreso =
-            pesoMeta > 0 ? (ultimoPeso / pesoMeta).clamp(0.0, 1.0) : 0.0;
-        bool llegoMeta = ultimoPeso >= pesoMeta && pesoMeta > 0;
-        final rank = i + 1;
-
-        return Card(
-          elevation: 2,
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
-              side: BorderSide(
-                  color: llegoMeta ? Colors.green : Colors.transparent,
-                  width: 2)),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      CircleAvatar(
-                          backgroundColor: const Color(0xFFfbf6ec),
-                          child: const Icon(FontAwesomeIcons.cow,
-                              color: Color(0xFFc99450))),
-                      if (gdp != null)
-                        Positioned(
-                          right: -4,
-                          top: -4,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: rank <= 3
-                                  ? medalColors[rank - 1]
-                                  : Colors.grey.shade300,
-                            ),
-                            child: Text('$rank',
-                                style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white)),
-                          ),
-                        ),
-                    ],
-                  ),
-                  title: Text('${animal.name} (${animal.earTagNumber})',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
-                  subtitle: gdp == null
-                      ? const Text('Ganancia Diaria: Faltan datos')
-                      : Text(
-                          'Ganancia Diaria: ${(gdp * 1000).toStringAsFixed(0)} gr',
-                          style: TextStyle(
-                            color: gdp < 0 ? Colors.red : null,
-                            fontWeight:
-                                gdp < 0 ? FontWeight.bold : null,
-                          ),
-                        ),
-                  trailing: IconButton(
-                      icon:
-                          const Icon(Icons.remove_red_eye, color: Colors.grey),
-                      onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) =>
-                                  AnimalDetailScreen(animalId: animal.id)))),
-                ),
-                const SizedBox(height: 10),
-
-                // --- NUEVA SECCIÓN: BARRA DE PROGRESO Y BOTÓN META ---
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Progreso: ${(progreso * 100).toStringAsFixed(1)}%',
-                      style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    InkWell(
-                      onTap: () => _showEditTargetWeightDialog(
-                          animal.id, pesoMeta, animal.name),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFc99450).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          children: [
-                            Text(
-                              'Meta: ${pesoMeta.toStringAsFixed(0)} kg',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFFc99450),
-                                  fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(width: 5),
-                            const Icon(Icons.edit,
-                                size: 14, color: Color(0xFFc99450)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 5),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: LinearProgressIndicator(
-                    value: progreso,
-                    minHeight: 12,
-                    backgroundColor: Colors.grey.shade200,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                        llegoMeta ? Colors.green : const Color(0xFFc99450)),
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Actual: ${ultimoPeso.toStringAsFixed(1)} kg',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                          color: Colors.grey)),
-                ),
-
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                        child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFc99450),
-                                side:
-                                    const BorderSide(color: Color(0xFFc99450)),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10))),
-                            icon: const Icon(Icons.scale, size: 18),
-                            label: const Text('Pesar'),
-                            onPressed: () => _showAddWeightDialog(animal))),
-                    const SizedBox(width: 15),
-                    Expanded(
-                        child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: llegoMeta
-                                    ? Colors.green
-                                    : Colors.grey.shade600,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10))),
-                            icon: const Icon(Icons.arrow_forward,
-                                color: Colors.white, size: 18),
-                            label: const Text('A Carne',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold)),
-                            onPressed: () => _moverACarne(animal))),
-                  ],
-                ),
-              ],
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFc99450),
+                  side: const BorderSide(color: Color(0xFFc99450)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10))),
+              icon: const Icon(Icons.scale, size: 18),
+              label: const Text('Pesaje por Lote'),
+              onPressed: () async {
+                if (_currentUser == null || _currentRanchId == null) return;
+                final saved = await showBulkWeightDialog(
+                  context,
+                  userId: _currentUser!.uid,
+                  ranchId: _currentRanchId!,
+                  animals: engordaAnimals,
+                );
+                if (saved && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('¡Pesajes guardados!'),
+                      backgroundColor: Colors.green));
+                }
+              },
             ),
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: sortedIndexes.length,
+            itemBuilder: (context, i) {
+              int originalIndex = sortedIndexes[i];
+              Animal animal = allAnimals[originalIndex];
+              Map<String, dynamic> data = rawData[originalIndex];
+
+              // Leemos la meta específica (500.0 por defecto si no existe)
+              double pesoMeta =
+                  (data['targetWeight'] as num?)?.toDouble() ?? 500.0;
+
+              double ultimoPeso = _getUltimoPeso(animal);
+              double? gdp = _calcularGDP(animal);
+              double progreso =
+                  pesoMeta > 0 ? (ultimoPeso / pesoMeta).clamp(0.0, 1.0) : 0.0;
+              bool llegoMeta = ultimoPeso >= pesoMeta && pesoMeta > 0;
+              final rank = i + 1;
+
+              return Card(
+                elevation: 2,
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    side: BorderSide(
+                        color: llegoMeta ? Colors.green : Colors.transparent,
+                        width: 2)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            CircleAvatar(
+                                backgroundColor: const Color(0xFFfbf6ec),
+                                child: const Icon(FontAwesomeIcons.cow,
+                                    color: Color(0xFFc99450))),
+                            if (gdp != null)
+                              Positioned(
+                                right: -4,
+                                top: -4,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: rank <= 3
+                                        ? medalColors[rank - 1]
+                                        : Colors.grey.shade300,
+                                  ),
+                                  child: Text('$rank',
+                                      style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white)),
+                                ),
+                              ),
+                          ],
+                        ),
+                        title: Text('${animal.name} (${animal.earTagNumber})',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16)),
+                        subtitle: gdp == null
+                            ? const Text('Ganancia Diaria: Faltan datos')
+                            : Text(
+                                'Ganancia Diaria: ${(gdp * 1000).toStringAsFixed(0)} gr',
+                                style: TextStyle(
+                                  color: gdp < 0 ? Colors.red : null,
+                                  fontWeight: gdp < 0 ? FontWeight.bold : null,
+                                ),
+                              ),
+                        trailing: IconButton(
+                            icon: const Icon(Icons.remove_red_eye,
+                                color: Colors.grey),
+                            onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => AnimalDetailScreen(
+                                        animalId: animal.id)))),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // --- NUEVA SECCIÓN: BARRA DE PROGRESO Y BOTÓN META ---
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Progreso: ${(progreso * 100).toStringAsFixed(1)}%',
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                          InkWell(
+                            onTap: () => _showEditTargetWeightDialog(
+                                animal.id, pesoMeta, animal.name),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFc99450)
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    'Meta: ${pesoMeta.toStringAsFixed(0)} kg',
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFFc99450),
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  const Icon(Icons.edit,
+                                      size: 14, color: Color(0xFFc99450)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: LinearProgressIndicator(
+                          value: progreso,
+                          minHeight: 12,
+                          backgroundColor: Colors.grey.shade200,
+                          valueColor: AlwaysStoppedAnimation<Color>(llegoMeta
+                              ? Colors.green
+                              : const Color(0xFFc99450)),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                            'Actual: ${ultimoPeso.toStringAsFixed(1)} kg',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: Colors.grey)),
+                      ),
+
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Expanded(
+                              child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFc99450),
+                                      side: const BorderSide(
+                                          color: Color(0xFFc99450)),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(10))),
+                                  icon: const Icon(Icons.scale, size: 18),
+                                  label: const Text('Pesar'),
+                                  onPressed: () =>
+                                      _showAddWeightDialog(animal))),
+                          const SizedBox(width: 15),
+                          Expanded(
+                              child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: llegoMeta
+                                          ? Colors.green
+                                          : Colors.grey.shade600,
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(10))),
+                                  icon: const Icon(Icons.arrow_forward,
+                                      color: Colors.white, size: 18),
+                                  label: const Text('A Carne',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold)),
+                                  onPressed: () => _moverACarne(animal))),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
