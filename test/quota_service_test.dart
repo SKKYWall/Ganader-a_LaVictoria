@@ -111,6 +111,42 @@ void main() {
     });
   });
 
+  group('QuotaStatus.clarificationsRemaining', () {
+    test('subtracts used from the free clarification cap', () {
+      const status = QuotaStatus(
+        monthlyUsed: 0,
+        monthlyFree: 5,
+        paidBatches: [],
+        isPremium: false,
+        clarificationsUsed: 2,
+      );
+      expect(status.clarificationsRemaining,
+          QuotaService.kMonthlyFreeClarifications - 2);
+    });
+
+    test('never goes negative when used exceeds the cap', () {
+      const status = QuotaStatus(
+        monthlyUsed: 0,
+        monthlyFree: 5,
+        paidBatches: [],
+        isPremium: false,
+        clarificationsUsed: QuotaService.kMonthlyFreeClarifications + 5,
+      );
+      expect(status.clarificationsRemaining, 0);
+    });
+
+    test('defaults to the full cap when nothing has been used', () {
+      const status = QuotaStatus(
+        monthlyUsed: 0,
+        monthlyFree: 5,
+        paidBatches: [],
+        isPremium: false,
+      );
+      expect(
+          status.clarificationsRemaining, QuotaService.kMonthlyFreeClarifications);
+    });
+  });
+
   group('QuotaStatus.canSend / nextSource priority', () {
     test('premium active and under limit can send from premium', () {
       final status = QuotaStatus(

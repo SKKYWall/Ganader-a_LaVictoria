@@ -65,6 +65,8 @@ class QuotaStatus {
   final bool isPremium;
   final DateTime? premiumExpiry;
   final int premiumMonthUsed;
+  final int clarificationsUsed;
+  final int clarificationsFree;
 
   const QuotaStatus({
     required this.monthlyUsed,
@@ -73,7 +75,16 @@ class QuotaStatus {
     required this.isPremium,
     this.premiumExpiry,
     this.premiumMonthUsed = 0,
+    this.clarificationsUsed = 0,
+    this.clarificationsFree = QuotaService.kMonthlyFreeClarifications,
   });
+
+  /// Aclaraciones gratis restantes este mes (respuestas de la IA que no
+  /// dieron ningún valor real — ver _ModePrompts y la etiqueta
+  /// [ACLARACION] en intelligence_screen.dart). No cuentan contra
+  /// monthlyRemaining mientras queden disponibles.
+  int get clarificationsRemaining =>
+      (clarificationsFree - clarificationsUsed).clamp(0, clarificationsFree);
 
   bool get premiumActive =>
       isPremium &&
@@ -137,6 +148,15 @@ class QuotaService {
   /// Consultas gratuitas mensuales (plan free)
   static const int kMonthlyFree = 5;
 
+  /// Tope mensual de "aclaraciones gratis" — respuestas de la IA que no
+  /// dieron ningún valor real (piden aclaración o dicen que no tienen el
+  /// dato sin poder orientar) no deberían costarle una consulta al
+  /// usuario, pero sin un tope propio alguien podría mandar preguntas
+  /// vagas a propósito sin límite — cada llamada a Gemini sigue
+  /// costando aunque no se descuente la cuota del usuario. Pasado este
+  /// tope, la respuesta vuelve a cobrar como una consulta normal.
+  static const int kMonthlyFreeClarifications = 5;
+
   /// Límite invisible mensual para Premium
   /// 1500/mes ≈ 50/día → protege de abuso sin afectar uso real de un ganadero
   static const int kPremiumMonthlyLimit = 1500;
@@ -179,6 +199,13 @@ class QuotaService {
           ? (quota['premiumMonthUsed'] as int? ?? 0)
           : 0;
 
+      // Contador de aclaraciones gratis (se resetea cada mes)
+      final clarificationMonthKey =
+          quota['clarificationMonthKey'] as String? ?? '';
+      final clarificationsUsed = clarificationMonthKey == currentMonth
+          ? (quota['clarificationsUsed'] as int? ?? 0)
+          : 0;
+
       // Lotes de consultas pagadas
       final List<PaidBatch> batches = [];
 
@@ -212,6 +239,7 @@ class QuotaService {
         isPremium: isPremium,
         premiumExpiry: premiumExpiry,
         premiumMonthUsed: premiumMonthUsed,
+        clarificationsUsed: clarificationsUsed,
       );
     } catch (_) {
       // Sin conexión → bloquear todo por seguridad
@@ -326,6 +354,37 @@ class QuotaService {
         quota['monthKey'] = currentMonth;
         quota['monthlyUsed'] = currentMonthlyUsed;
       }
+
+      tx.set(ref, {'quota': quota}, SetOptions(merge: true));
+    });
+
+    return consumed;
+  }
+
+  // ── Consumir una "aclaración gratis" (respuesta de la IA sin valor real) ──
+  // Devuelve true si se descontó del tope de aclaraciones gratis (no afecta
+  // la cuota normal). Devuelve false si ya se agotó el tope de este mes —
+  // en ese caso el caller debe llamar a consumeConsult() en su lugar, para
+  // que esa respuesta sí cuente como una consulta normal.
+  static Future<bool> consumeClarification() async {
+    final currentMonth = _monthKey();
+    bool consumed = false;
+
+    await FirebaseFirestore.instance.runTransaction((tx) async {
+      final ref = _userRef();
+      final snap = await tx.get(ref);
+      final data = snap.data() ?? {};
+      final quota = Map<String, dynamic>.from(data['quota'] as Map? ?? {});
+
+      final savedMonth = quota['clarificationMonthKey'] as String? ?? '';
+      final currentUsed =
+          savedMonth == currentMonth ? (quota['clarificationsUsed'] as int? ?? 0) : 0;
+
+      if (currentUsed >= kMonthlyFreeClarifications) return; // tope agotado
+
+      quota['clarificationMonthKey'] = currentMonth;
+      quota['clarificationsUsed'] = currentUsed + 1;
+      consumed = true;
 
       tx.set(ref, {'quota': quota}, SetOptions(merge: true));
     });

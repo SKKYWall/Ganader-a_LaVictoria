@@ -28,6 +28,7 @@ class ChatMessage {
   final DateTime timestamp;
   bool truncated; // true si la IA cortó la respuesta por el límite de tokens
   final String? sourcePrompt; // prompt original, para poder continuar
+  final bool wasFreeClarification; // no contó contra la cuota mensual
 
   ChatMessage({
     required this.text,
@@ -37,6 +38,7 @@ class ChatMessage {
     DateTime? timestamp,
     this.truncated = false,
     this.sourcePrompt,
+    this.wasFreeClarification = false,
   }) : timestamp = timestamp ?? DateTime.now();
 }
 
@@ -471,7 +473,8 @@ class _ModePrompts {
   • Si el dato que te piden NO está en DATOS DEL RANCHO, en el historial ni en la consulta, dilo explícitamente ("no tengo ese dato registrado para este animal/rancho") — nunca inventes cifras, fechas, nombres de animales o resultados de laboratorio.
   • Si tu respuesta es una estimación, un promedio o un cálculo derivado (no un dato medido tal cual), dilo con palabras como "aproximado", "estimado" o "con los datos disponibles" — no la presentes como un hecho exacto.
   • Si la pregunta es ambigua o le faltan datos para responder con precisión (ej. no especifica qué animal, qué fecha, o falta su peso/raza), pide la aclaración puntual en vez de adivinar o responder en general.
-  • Si CONTEXTO dice "Consulta técnica general (sin datos de rancho específico)", acláralo en la respuesta — es orientación general, no algo calculado con los datos de este rancho.''';
+  • Si CONTEXTO dice "Consulta técnica general (sin datos de rancho específico)", acláralo en la respuesta — es orientación general, no algo calculado con los datos de este rancho.
+- ETIQUETA [ACLARACION]: el usuario paga por cada consulta de una cuota mensual limitada, así que una respuesta que NO le da ningún valor aprovechable no debería costarle igual que una que sí. Si tu respuesta completa consiste ÚNICAMENTE en pedir una aclaración (no identificas a qué animal/dato se refiere y no puedes dar ninguna orientación general relacionada) O en decir que no tienes el dato sin poder ofrecer ninguna orientación general útil sobre el tema, inicia tu respuesta EXACTAMENTE con la etiqueta "[ACLARACION]" sola en la primera línea, seguida de tu pregunta. Si sí puedes dar algo de valor (una orientación general, un rango típico, pasos a seguir) aunque no sea específico a los datos de este rancho, NO uses la etiqueta — eso cuenta como una respuesta útil.''';
 
     switch (mode) {
       case 'Veterinario':
@@ -882,15 +885,33 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
       );
 
       final respuesta = await _callGemini(prompt, imageFile: tempImage);
+
+      // Si la IA marcó su respuesta como [ACLARACION] (no dio ningún valor
+      // real — ver honestyRule en _ModePrompts), se descuenta del tope de
+      // aclaraciones gratis en vez de la cuota normal. Si ese tope ya se
+      // agotó este mes, cae a consumeConsult() como cualquier consulta.
+      const clarificationTag = '[ACLARACION]';
+      String displayText = respuesta.text;
+      bool isFreeClarification = false;
+      final trimmedStart = displayText.trimLeft();
+      if (trimmedStart.toUpperCase().startsWith(clarificationTag)) {
+        displayText =
+            trimmedStart.substring(clarificationTag.length).trimLeft();
+        isFreeClarification = await QuotaService.consumeClarification();
+      }
+
       setState(() => _messages.add(ChatMessage(
-            text: respuesta.text,
+            text: displayText,
             isUser: false,
             truncated: respuesta.truncated,
             sourcePrompt: prompt,
+            wasFreeClarification: isFreeClarification,
           )));
 
       // ── CONSUMIR CUOTA DESPUÉS DE RESPUESTA EXITOSA ───────────────────
-      await QuotaService.consumeConsult();
+      if (!isFreeClarification) {
+        await QuotaService.consumeConsult();
+      }
       await _loadQuota(); // Refrescar el banner
 
       _scrollToBottom();
@@ -1521,6 +1542,22 @@ class _IntelligenceScreenState extends State<IntelligenceScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Respuesta que no dio valor real (pidió aclaración o dijo
+                // que no tenía el dato) — no cuenta contra la cuota mensual.
+                if (msg.wasFreeClarification) ...[
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 13, color: Colors.teal.shade600),
+                      const SizedBox(width: 4),
+                      Text('No contó contra tu límite mensual',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.teal.shade600,
+                              fontStyle: FontStyle.italic)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                ],
                 Text(msg.text,
                     style: const TextStyle(
                         fontSize: 14, color: Color(0xFF333333), height: 1.5)),
