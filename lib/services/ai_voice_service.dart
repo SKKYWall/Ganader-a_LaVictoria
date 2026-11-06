@@ -23,32 +23,38 @@ TU TAREA MÁS IMPORTANTE: Interpretar su intención real, ignorar la paja (como 
 
 REGLA ABSOLUTA: Devuelve ÚNICAMENTE un objeto JSON válido. Cero texto extra, sin markdown, sin saludos.
 
+REGLA ANTI-AMBIGÜEDAD: No adivines un dato que no se mencionó de forma razonable — usa el valor por defecto indicado abajo, y dilo explícitamente en "resumen_confirmacion" (ej. "no mencionaste la raza, pondré 'Otro'") para que el ganadero pueda corregirlo antes de guardar. Nunca presentes un valor por defecto como si el usuario lo hubiera dicho.
+
 ═══════════════════════════════════════
 DICCIONARIO DE INTENCIONES (Cómo deduce la acción)
 ═══════════════════════════════════════
 - "crear_animal": "quiero registrar...", "agrega un...", "mete una vaca", "da de alta", "apunta este becerro", "nuevo animal".
 - "editar_animal": "cámbiale el dato...", "corrige a...", "actualiza el", "me equivoqué, modifícalo".
-- "eliminar_animal": "borra a...", "saca al...", "da de baja", "vendí al...", "se murió el...", "elimina".
+- "eliminar_animal" (esto es DAR DE BAJA, no un borrado permanente — la app pedirá confirmar el motivo exacto): "borra a...", "saca al...", "da de baja", "vendí al...", "se murió el...", "elimina", "ya no está", "se me fue".
 - "registrar_peso": "pesó...", "dio en la báscula...", "anótale un peso de...", "pesa".
-- "registrar_vacuna": "le puse la...", "apliqué...", "vacuné contra...", "inyecté".
-- "registrar_evento": "parió", "se enfermó", "revisión", "lo castramos".
+- "registrar_vacuna": "le puse la...", "apliqué...", "vacuné contra...", "inyecté", "desparasité" (usa el nombre del desparasitante como si fuera la vacuna).
+- "registrar_servicio_reproductivo": "la monté con el toro...", "la aparté con el semental...", "la inseminé...", "le hice la inseminación...", "pajilla de...", "servicio con...".
+- "registrar_evento": "parió", "se enfermó", "revisión", "lo castramos" (cualquier cosa que no encaje arriba).
 
 ═══════════════════════════════════════
 GUÍA DE EXTRACCIÓN Y VALORES POR DEFECTO
 ═══════════════════════════════════════
 1. NOTACIÓN "SOBRE": Si dice "285 sobre 3", "285 diagonal 3" o "285 raya 3" -> arete=285, pierna=3. Nombre del animal="285/3".
 2. ARETE / PIERNA: Si no menciona arete -> "Sin arete". Si no menciona pierna -> "Sin pierna".
-3. SEXO (OBLIGATORIO): Si dice vaca, becerra, novilla -> "Hembra". Si dice toro, becerro, semental -> "Macho". Si no lo menciona o no es claro -> "Hembra" (Defecto).
-4. RAZA (OBLIGATORIO): Valores permitidos: Nelore, Angus, Brangus, Brahman, Brahman Rojo, Hereford, Charolais, Simmental, Limousin, Holstein, Jersey, Suizo Pardo, Guzerat, Indubrasil, Beefmaster, Santa Gertrudis, Texas Longhorn, Cebú, Otro. Si no dice una de estas o no menciona -> "Otro" (Defecto).
-5. PROPÓSITO (OBLIGATORIO): Valores permitidos: Leche, Carne, Genética, Engorda, Reproductora. Si no menciona -> "Reproductora" (Defecto).
+3. SEXO (OBLIGATORIO): Si dice vaca, becerra, novilla -> "Hembra". Si dice toro, becerro, semental -> "Macho". Si no lo menciona o no es claro -> "Hembra" (Defecto, decláralo en el resumen).
+4. RAZA (OBLIGATORIO): Valores permitidos: Nelore, Angus, Brangus, Brahman, Brahman Rojo, Hereford, Charolais, Simmental, Limousin, Holstein, Jersey, Suizo Pardo, Guzerat, Indubrasil, Beefmaster, Santa Gertrudis, Texas Longhorn, Cebú, Otro.
+   Sinónimos/variantes habladas comunes que debes normalizar al valor de la lista: "cebú"/"cebu"/"indico"/"indicu" -> Cebú; "suizo"/"pardo suizo"/"suizo pardo" -> Suizo Pardo; "holando"/"holandés" -> Holstein; "simental"/"si mental" -> Simmental; "limosin"/"limozin" -> Limousin; "beef master" -> Beefmaster; "brahman colorado"/"brahman rojo" -> Brahman Rojo; "indu brasil" -> Indubrasil; "angus negro"/"angus colorado"/"angus rojo" -> Angus; "tejano"/"cuernos largos" -> Texas Longhorn; "criollo"/"mestizo"/"cruza"/"revuelto" -> Otro.
+   Si no dice una de estas ni un sinónimo reconocible -> "Otro" (Defecto, decláralo en el resumen).
+5. PROPÓSITO (OBLIGATORIO): Valores permitidos: Leche, Carne, Genética, Engorda, Reproductora. Si no menciona -> "Reproductora" (Defecto, decláralo en el resumen).
 6. FECHA DE NACIMIENTO: Si no menciona una fecha específica -> "$today".
+7. TIPO DE SERVICIO REPRODUCTIVO (solo para "registrar_servicio_reproductivo"): "monta", "monté", "semental natural", "toro" -> "Monta Natural". "inseminé", "inseminación", "IA", "pajilla" -> "Inseminación Artificial". Si no es claro -> "Monta Natural" (Defecto, decláralo en el resumen).
 
 ═══════════════════════════════════════
 ESTRUCTURA JSON DE RESPUESTA
 ═══════════════════════════════════════
 {
-  "accion": "crear_animal | editar_animal | eliminar_animal | registrar_peso | registrar_vacuna | registrar_evento",
-  "animal": "nombre o identificador principal",
+  "accion": "crear_animal | editar_animal | eliminar_animal | registrar_peso | registrar_vacuna | registrar_servicio_reproductivo | registrar_evento",
+  "animal": "nombre o identificador principal (la hembra, si es un servicio reproductivo)",
   "arete": "número exacto, o 'Sin arete'",
   "pierna": "número exacto, o 'Sin pierna'",
   "raza": "valor válido de la lista",
@@ -57,22 +63,27 @@ ESTRUCTURA JSON DE RESPUESTA
   "fecha_nacimiento": "dd/MM/yyyy o '$today'",
   "peso": "número en kg o vacío",
   "vacuna": "nombre de la vacuna o vacío",
+  "tipo_servicio": "Monta Natural | Inseminación Artificial (solo si accion=registrar_servicio_reproductivo)",
+  "semental": "nombre o arete del semental/pajilla (solo si accion=registrar_servicio_reproductivo)",
   "evento": "descripción del evento o vacío",
   "detalles": "datos adicionales",
-  "resumen_confirmacion": "Ejemplo: 'Voy a registrar un animal Nelore, arete 285, pierna 3'"
+  "resumen_confirmacion": "Ejemplo: 'Voy a registrar un animal Nelore, arete 285, pierna 3. No mencionaste el propósito, pondré Reproductora.'"
 }
 
 ═══════════════════════════════════════
 EJEMPLOS DE INTERPRETACIÓN DE MULETILLAS
 ═══════════════════════════════════════
 Entrada: "Este... a ver, quiero que agregues un animal nuevo... mmm, ponle que es Nelore, de arete 285 sobre 3, para engorda."
-Salida Esperada: {"accion":"crear_animal","animal":"285/3","arete":"285","pierna":"3","raza":"Nelore","sexo":"Hembra","proposito":"Engorda","fecha_nacimiento":"$today","peso":"","vacuna":"","evento":"","detalles":"","resumen_confirmacion":"Voy a registrar un animal Nelore para engorda, arete 285 y pierna 3"}
+Salida Esperada: {"accion":"crear_animal","animal":"285/3","arete":"285","pierna":"3","raza":"Nelore","sexo":"Hembra","proposito":"Engorda","fecha_nacimiento":"$today","peso":"","vacuna":"","evento":"","detalles":"","resumen_confirmacion":"Voy a registrar un animal Nelore para engorda, arete 285 y pierna 3. No mencionaste el sexo, pondré Hembra."}
 
 Entrada: "Fíjate que vendí al toro Angus número 45, dalo de baja por favor."
-Salida Esperada: {"accion":"eliminar_animal","animal":"45","arete":"45","pierna":"Sin pierna","raza":"Angus","sexo":"Macho","proposito":"Reproductora","fecha_nacimiento":"$today","peso":"","vacuna":"","evento":"","detalles":"Vendido","resumen_confirmacion":"Voy a dar de baja al toro Angus con arete 45"}
+Salida Esperada: {"accion":"eliminar_animal","animal":"45","arete":"45","pierna":"Sin pierna","raza":"Angus","sexo":"Macho","proposito":"Reproductora","fecha_nacimiento":"$today","peso":"","vacuna":"","evento":"","detalles":"Vendido","resumen_confirmacion":"Voy a dar de baja al toro Angus con arete 45 — te voy a pedir que confirmes el motivo exacto"}
 
 Entrada: "Anota que pesamos a la vaca pinta de la pierna 12 y nos dio 450 kilos."
 Salida Esperada: {"accion":"registrar_peso","animal":"12","arete":"Sin arete","pierna":"12","raza":"Otro","sexo":"Hembra","proposito":"Reproductora","fecha_nacimiento":"$today","peso":"450","vacuna":"","evento":"","detalles":"pinta","resumen_confirmacion":"Voy a registrar un peso de 450 kilos para la vaca de pierna 12"}
+
+Entrada: "Apunta que a la vaca 20 la monté con el toro Brangus 7."
+Salida Esperada: {"accion":"registrar_servicio_reproductivo","animal":"20","arete":"20","pierna":"Sin pierna","raza":"Otro","sexo":"Hembra","proposito":"Reproductora","fecha_nacimiento":"$today","peso":"","vacuna":"","tipo_servicio":"Monta Natural","semental":"7","evento":"","detalles":"","resumen_confirmacion":"Voy a registrar monta natural de la vaca 20 con el semental 7, hoy"}
 
 TEXTO DEL GANADERO A PROCESAR:
 "$spokenText"

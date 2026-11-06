@@ -7,6 +7,10 @@ import 'package:manual_ganadero_flutter/services/ai_voice_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:manual_ganadero_flutter/models/animal.dart';
+import 'package:manual_ganadero_flutter/widgets/animal_exit_dialog.dart';
+import 'package:manual_ganadero_flutter/core/reproductive_utils.dart';
+import 'package:manual_ganadero_flutter/services/notification_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VALORES VÁLIDOS — deben coincidir EXACTAMENTE con edit_animal_screen.dart
@@ -40,6 +44,7 @@ const _validBreeds = [
   'Cebú',
   'Otro',
 ];
+const _validServiceTypes = ['Monta Natural', 'Inseminación Artificial'];
 
 // ── Palabras clave ampliadas (igual que en live_voice_dialog) ──
 const _confirmWords = [
@@ -129,6 +134,10 @@ class VoiceActionDialog {
     if (!_validBreeds.contains(initRaza)) initRaza = 'Otro';
     String initProp = data['proposito']?.toString() ?? 'Reproductora';
     if (!_validPurposes.contains(initProp)) initProp = 'Reproductora';
+    String initTipoServicio = data['tipo_servicio']?.toString() ?? 'Monta Natural';
+    if (!_validServiceTypes.contains(initTipoServicio)) {
+      initTipoServicio = 'Monta Natural';
+    }
 
     final animalCtrl =
         TextEditingController(text: data['animal']?.toString() ?? '');
@@ -149,6 +158,9 @@ class VoiceActionDialog {
         TextEditingController(text: data['detalles']?.toString() ?? '');
     final nacimientoCtrl = TextEditingController(
         text: _cleanDateField(data['fecha_nacimiento']?.toString() ?? ''));
+    final tipoServicioCtrl = TextEditingController(text: initTipoServicio);
+    final sementalCtrl =
+        TextEditingController(text: data['semental']?.toString() ?? '');
 
     if (autoExecute) {
       if (!context.mounted) return;
@@ -165,7 +177,9 @@ class VoiceActionDialog {
           vacunaCtrl.text,
           eventoCtrl.text,
           detallesCtrl.text,
-          nacimientoCtrl.text);
+          nacimientoCtrl.text,
+          tipoServicio: tipoServicioCtrl.text,
+          semental: sementalCtrl.text);
       return;
     }
 
@@ -234,7 +248,9 @@ class VoiceActionDialog {
                       vacunaCtrl.text,
                       eventoCtrl.text,
                       detallesCtrl.text,
-                      nacimientoCtrl.text);
+                      nacimientoCtrl.text,
+                      tipoServicio: tipoServicioCtrl.text,
+                      semental: sementalCtrl.text);
                 } else {
                   Navigator.of(ctx).pop();
                   tts.speak('Acción cancelada');
@@ -367,6 +383,28 @@ class VoiceActionDialog {
                     const SizedBox(height: 8),
                   ],
 
+                  if (accion == 'registrar_servicio_reproductivo') ...[
+                    DropdownButtonFormField<String>(
+                      initialValue: _validServiceTypes
+                              .contains(tipoServicioCtrl.text)
+                          ? tipoServicioCtrl.text
+                          : 'Monta Natural',
+                      decoration: const InputDecoration(
+                          labelText: 'Tipo de servicio',
+                          border: OutlineInputBorder(),
+                          isDense: true),
+                      items: _validServiceTypes
+                          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                          .toList(),
+                      onChanged: (val) => setModalState(
+                          () => tipoServicioCtrl.text = val ?? 'Monta Natural'),
+                    ),
+                    const SizedBox(height: 8),
+                    _field('Semental (arete o nombre)', sementalCtrl,
+                        hint: 'Ej: 12 o "El Rayado"'),
+                    const SizedBox(height: 8),
+                  ],
+
                   if (accion == 'registrar_evento') ...[
                     _field('Tipo de evento', eventoCtrl,
                         hint: 'Ej: Parto, Tratamiento, Cita'),
@@ -381,16 +419,19 @@ class VoiceActionDialog {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                          color: Colors.red.shade50,
+                          color: Colors.orange.shade50,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.red.shade200)),
+                          border: Border.all(color: Colors.orange.shade200)),
                       child: const Row(children: [
-                        Icon(Icons.warning_amber, color: Colors.red, size: 18),
+                        Icon(Icons.info_outline,
+                            color: Colors.orange, size: 18),
                         SizedBox(width: 8),
                         Expanded(
-                            child: Text('Esta acción no se puede deshacer.',
+                            child: Text(
+                                'A continuación se te pedirá confirmar el motivo '
+                                '(vendido, muerto o error de captura).',
                                 style: TextStyle(
-                                    color: Colors.red, fontSize: 13))),
+                                    color: Colors.orange, fontSize: 13))),
                       ]),
                     ),
                     const SizedBox(height: 8),
@@ -491,7 +532,9 @@ class VoiceActionDialog {
                             vacunaCtrl.text,
                             eventoCtrl.text,
                             detallesCtrl.text,
-                            nacimientoCtrl.text);
+                            nacimientoCtrl.text,
+                            tipoServicio: tipoServicioCtrl.text,
+                            semental: sementalCtrl.text);
                       },
                       icon: const Icon(Icons.check, color: Colors.white),
                       label: Text(config['buttonText'],
@@ -647,8 +690,10 @@ class VoiceActionDialog {
     String vacuna,
     String evento,
     String detalles,
-    String fechaNacimiento,
-  ) async {
+    String fechaNacimiento, {
+    String tipoServicio = 'Monta Natural',
+    String semental = '',
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -767,10 +812,73 @@ class VoiceActionDialog {
 
       switch (accion) {
         case 'eliminar_animal':
-          await docRef.delete();
+          // No se borra directo — pasa por el mismo flujo de baja que usa
+          // el resto de la app (vendido/muerto/error de captura), para no
+          // perder historial ni romper ligas de padre/madre por accidente.
+          final animalToExit = Animal.fromFirestore(docData, found.id);
+          final changed = await showAnimalExitDialog(context, animalToExit);
           if (!context.mounted) return;
-          _showSnack(context, '🗑️ Animal "$realName" eliminado.', Colors.red);
-          await tts.speak('Animal eliminado correctamente');
+          if (changed) {
+            _showSnack(
+                context, '✅ "$realName" dado de baja.', Colors.green);
+            await tts.speak('$realName dado de baja correctamente');
+          } else {
+            await tts.speak('Baja cancelada');
+          }
+          break;
+
+        case 'registrar_servicio_reproductivo':
+          final serviceTypeDb = _validServiceTypes.contains(tipoServicio)
+              ? tipoServicio
+              : 'Monta Natural';
+          final sireValue = semental.trim().isNotEmpty ? semental.trim() : null;
+          final serviceDate = DateTime.now();
+          final event = ReproductiveEvent(
+            serviceType: serviceTypeDb,
+            sireEarTag: sireValue,
+            serviceDate: serviceDate,
+          );
+          final estimatedBirth = expectedCalvingDate(serviceDate);
+
+          WriteBatch batch = FirebaseFirestore.instance.batch();
+          batch.update(docRef, {
+            'isPregnant': true,
+            'pregnancyDate': Timestamp.fromDate(serviceDate),
+            'reproductiveEvents': FieldValue.arrayUnion([event.toMap()]),
+          });
+          final eventRef = FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('ranches')
+              .doc(ranchId)
+              .collection('calendarEvents')
+              .doc();
+          batch.set(eventRef, {
+            'title': 'Parto esperado: $realName',
+            'description': 'Fecha estimada de parto (Arete: ${docData['earTagNumber']})',
+            'date': Timestamp.fromDate(estimatedBirth),
+            'category': 'Parto',
+            'animalId': found.id,
+          });
+          await batch.commit();
+
+          final alertDate = estimatedBirth.subtract(const Duration(days: 7));
+          if (alertDate.isAfter(DateTime.now())) {
+            await NotificationService().scheduleNotification(
+              id: found.id.hashCode,
+              title: '¡Parto Cercano! 🐄',
+              body:
+                  'La vaca $realName está a aprox. una semana de su fecha de parto.',
+              scheduledDate: alertDate,
+            );
+          }
+
+          if (!context.mounted) return;
+          _showSnack(
+              context,
+              '✅ Servicio ($serviceTypeDb) registrado para "$realName".',
+              Colors.green);
+          await tts.speak('Servicio reproductivo registrado para $realName');
           break;
 
         case 'editar_animal':
@@ -1020,10 +1128,10 @@ class VoiceActionDialog {
         };
       case 'eliminar_animal':
         return {
-          'title': 'Eliminar Animal',
-          'icon': Icons.delete_forever,
+          'title': 'Dar de Baja',
+          'icon': Icons.logout,
           'color': Colors.red,
-          'buttonText': 'Confirmar Eliminación'
+          'buttonText': 'Continuar con la Baja'
         };
       case 'editar_animal':
         return {
@@ -1045,6 +1153,13 @@ class VoiceActionDialog {
           'icon': Icons.vaccines,
           'color': Colors.indigo,
           'buttonText': 'Registrar Vacuna'
+        };
+      case 'registrar_servicio_reproductivo':
+        return {
+          'title': 'Servicio Reproductivo',
+          'icon': Icons.favorite,
+          'color': Colors.pink,
+          'buttonText': 'Registrar Servicio'
         };
       default:
         return {
