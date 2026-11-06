@@ -460,6 +460,19 @@ class _ModePrompts {
     const lengthRule =
         '- LONGITUD ESTRICTA: Máximo 3 párrafos cortos. Termina la idea de forma natural antes de los 1400 tokens. Sin saludos ni despedidas.';
 
+    // Regla anti-ambigüedad/anti-invención — aplica a los 4 modos. El
+    // objetivo es que el usuario sepa distinguir siempre un dato real
+    // (medido/registrado) de una estimación o de algo que simplemente no
+    // se sabe, en vez de recibir una respuesta que suena segura pero no
+    // lo es. Mismo criterio de honestidad que ya se aplicó a los módulos
+    // de Genética/Engorda/Finanzas: mejor decir "no lo sé" que inventar.
+    const honestyRule = '''
+- HONESTIDAD ANTES QUE TODO:
+  • Si el dato que te piden NO está en DATOS DEL RANCHO, en el historial ni en la consulta, dilo explícitamente ("no tengo ese dato registrado para este animal/rancho") — nunca inventes cifras, fechas, nombres de animales o resultados de laboratorio.
+  • Si tu respuesta es una estimación, un promedio o un cálculo derivado (no un dato medido tal cual), dilo con palabras como "aproximado", "estimado" o "con los datos disponibles" — no la presentes como un hecho exacto.
+  • Si la pregunta es ambigua o le faltan datos para responder con precisión (ej. no especifica qué animal, qué fecha, o falta su peso/raza), pide la aclaración puntual en vez de adivinar o responder en general.
+  • Si CONTEXTO dice "Consulta técnica general (sin datos de rancho específico)", acláralo en la respuesta — es orientación general, no algo calculado con los datos de este rancho.''';
+
     switch (mode) {
       case 'Veterinario':
         return '''Eres médico veterinario bovino con 20 años de experiencia en campo. Diagnóstico rápido, medicina preventiva y tratamiento práctico.
@@ -475,6 +488,7 @@ REGLAS:
 - Termina la idea de forma natural antes de los 1400 tokens.
 
 $lengthRule
+$honestyRule
 
 HISTORIAL:
 $history
@@ -493,6 +507,7 @@ REGLAS:
 - Imagen: conformación y fenotipo
 - Termina la idea de forma natural antes de los 1400 tokens.
 $lengthRule
+$honestyRule
 
 HISTORIAL:
 $history
@@ -511,6 +526,7 @@ REGLAS:
 - Imagen: condición corporal escala 1-5
 - Termina la idea de forma natural antes de los 1400 tokens.
 $lengthRule
+$honestyRule
 
 HISTORIAL:
 $history
@@ -528,6 +544,7 @@ REGLAS:
 - Preguntas financieras: referencias del mercado mexicano
 - Termina la idea de forma natural antes de los 1400 tokens.
 $lengthRule
+$honestyRule
 
 HISTORIAL:
 $history
