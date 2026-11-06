@@ -5,6 +5,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/screens/bovino/animal_detail_screen.dart';
 import 'package:manual_ganadero_flutter/core/medication_catalog.dart';
 import 'package:manual_ganadero_flutter/core/withdrawal_utils.dart';
+import 'package:manual_ganadero_flutter/models/sanitary_plan.dart';
 
 class SanidadScreen extends StatefulWidget {
   const SanidadScreen({super.key});
@@ -373,7 +374,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
           body: Center(child: Text("Selecciona un rancho primero")));
     }
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         backgroundColor: const Color(0xFFfbf6ec),
         appBar: AppBar(
@@ -392,11 +393,13 @@ class _SanidadScreenState extends State<SanidadScreen> {
             labelColor: Colors.teal,
             unselectedLabelColor: Colors.grey,
             indicatorColor: Colors.teal,
+            isScrollable: true,
             tabs: [
               Tab(icon: Icon(Icons.vaccines), text: "Aplicación Masiva"),
               Tab(
                   icon: Icon(Icons.warning_amber_rounded),
                   text: "En Cuarentena (Retiro)"),
+              Tab(icon: Icon(Icons.assignment), text: "Planes Sanitarios"),
             ],
           ),
         ),
@@ -479,6 +482,7 @@ class _SanidadScreenState extends State<SanidadScreen> {
                     children: [
                       _buildMassApplicationTab(allDocs),
                       _buildQuarantineTab(quarantinedDocs),
+                      _buildPlansTab(),
                     ],
                   ),
                 ),
@@ -658,28 +662,46 @@ class _SanidadScreenState extends State<SanidadScreen> {
                   blurRadius: 10,
                   offset: const Offset(0, -5))
             ]),
-            child: SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10))),
-                icon: _isApplying
-                    ? const SizedBox()
-                    : const Icon(Icons.vaccines, color: Colors.white),
-                label: _isApplying
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : Text('Aplicar a ${_selectedAnimals.length} animales',
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white)),
-                onPressed: _isApplying
-                    ? null
-                    : _showConfirmationDialog, // <--- AHORA LLAMA AL DIÁLOGO
-              ),
+            child: Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    icon: _isApplying
+                        ? const SizedBox()
+                        : const Icon(Icons.vaccines, color: Colors.white),
+                    label: _isApplying
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Text('Aplicar a ${_selectedAnimals.length} animales',
+                            style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white)),
+                    onPressed: _isApplying ? null : _showConfirmationDialog,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.teal,
+                        side: const BorderSide(color: Colors.teal),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    icon: const Icon(Icons.assignment, size: 18),
+                    label: Text(
+                        'Asignar Plan Sanitario a ${_selectedAnimals.length} animales'),
+                    onPressed: _isApplying ? null : _showAssignPlanDialog,
+                  ),
+                ),
+              ],
             ),
           )
       ],
@@ -746,6 +768,325 @@ class _SanidadScreenState extends State<SanidadScreen> {
         );
       },
     );
+  }
+
+  // ─── Planes sanitarios preconfigurados ─────────────────────────────────
+  CollectionReference get _plansRef => _firestore
+      .collection('users')
+      .doc(_currentUser!.uid)
+      .collection('ranches')
+      .doc(_currentRanchId)
+      .collection('sanitaryPlans');
+
+  Widget _buildPlansTab() {
+    return Stack(
+      children: [
+        StreamBuilder<QuerySnapshot>(
+          stream: _plansRef.snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(
+                  child: CircularProgressIndicator(color: Colors.teal));
+            }
+            final plans = (snapshot.data?.docs ?? [])
+                .map((d) => SanitaryPlan.fromFirestore(
+                    d.data() as Map<String, dynamic>, d.id))
+                .toList();
+            if (plans.isEmpty) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24.0),
+                  child: Text(
+                      'No tienes planes sanitarios. Crea uno para programar '
+                      'de un jalón los recordatorios de vacunación/desparasitación '
+                      'de una categoría completa de animales.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey)),
+                ),
+              );
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+              itemCount: plans.length,
+              itemBuilder: (context, index) {
+                final plan = plans[index];
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  child: ExpansionTile(
+                    leading: const Icon(Icons.assignment, color: Colors.teal),
+                    title: Text(plan.name,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('${plan.steps.length} paso(s)'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline,
+                          color: Colors.red),
+                      tooltip: 'Eliminar plan',
+                      onPressed: () => _plansRef.doc(plan.id).delete(),
+                    ),
+                    children: plan.steps
+                        .map((s) => ListTile(
+                              dense: true,
+                              leading:
+                                  const Icon(Icons.circle, size: 8),
+                              title: Text('${s.type}: ${s.label}'),
+                              subtitle: Text('Día +${s.offsetDays}'
+                                  '${s.suggestedWithdrawalDays != null ? ' · Retiro sugerido: ${s.suggestedWithdrawalDays}d' : ''}'),
+                            ))
+                        .toList(),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+        Positioned(
+          bottom: 16,
+          right: 16,
+          child: FloatingActionButton.extended(
+            backgroundColor: Colors.teal,
+            icon: const Icon(Icons.add),
+            label: const Text('Crear Plan'),
+            onPressed: _showCreatePlanDialog,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showCreatePlanDialog() async {
+    final nameController = TextEditingController();
+    final List<Map<String, dynamic>> steps = [];
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (context, setStateDialog) {
+          final labelController = TextEditingController();
+          final offsetController = TextEditingController();
+          final withdrawalController = TextEditingController();
+          String stepType = 'Vacuna';
+
+          return AlertDialog(
+            backgroundColor: const Color(0xFFfbf6ec),
+            title: const Text('Crear Plan Sanitario',
+                style: TextStyle(
+                    color: Color(0xFF5e3a1c), fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    maxLength: 60,
+                    decoration: const InputDecoration(
+                        labelText: 'Nombre del plan (ej. "Becerros 0-6 meses")'),
+                  ),
+                  const Divider(),
+                  if (steps.isNotEmpty)
+                    ...steps.asMap().entries.map((e) => ListTile(
+                          dense: true,
+                          title: Text('${e.value['type']}: ${e.value['label']}'),
+                          subtitle: Text('Día +${e.value['offsetDays']}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () =>
+                                setStateDialog(() => steps.removeAt(e.key)),
+                          ),
+                        )),
+                  const SizedBox(height: 8),
+                  const Text('Agregar paso:',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  DropdownButtonFormField<String>(
+                    initialValue: stepType,
+                    isExpanded: true,
+                    items: _medTypes
+                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (val) => setStateDialog(() => stepType = val!),
+                  ),
+                  TextFormField(
+                    controller: labelController,
+                    maxLength: 40,
+                    decoration:
+                        const InputDecoration(labelText: 'Nombre / producto'),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: offsetController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: 'Día (desde asignación)'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextFormField(
+                          controller: withdrawalController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: 'Retiro sugerido (días)'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Agregar paso'),
+                      onPressed: () {
+                        if (labelController.text.trim().isEmpty ||
+                            offsetController.text.trim().isEmpty) {
+                          return;
+                        }
+                        setStateDialog(() {
+                          steps.add({
+                            'type': stepType,
+                            'label': labelController.text.trim(),
+                            'offsetDays':
+                                int.tryParse(offsetController.text.trim()) ?? 0,
+                            'suggestedWithdrawalDays':
+                                int.tryParse(withdrawalController.text.trim()),
+                          });
+                          labelController.clear();
+                          offsetController.clear();
+                          withdrawalController.clear();
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar',
+                    style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                onPressed: () async {
+                  if (nameController.text.trim().isEmpty || steps.isEmpty) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                        content:
+                            Text('Ingresa un nombre y al menos un paso'),
+                        backgroundColor: Colors.red));
+                    return;
+                  }
+                  final plan = SanitaryPlan(
+                    id: '',
+                    name: nameController.text.trim(),
+                    steps: steps
+                        .map((s) => SanitaryPlanStep(
+                              type: s['type'] as String,
+                              label: s['label'] as String,
+                              offsetDays: s['offsetDays'] as int,
+                              suggestedWithdrawalDays:
+                                  s['suggestedWithdrawalDays'] as int?,
+                            ))
+                        .toList(),
+                  );
+                  await _plansRef.add(plan.toFirestore());
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child:
+                    const Text('Guardar', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
+  // Asignar un plan NO aplica el tratamiento directamente — programa un
+  // evento de calendario por cada paso × animal seleccionado, fechado
+  // hoy + offsetDays del paso, reutilizando el sistema de
+  // calendario/notificaciones que ya existe. El usuario confirma y aplica
+  // el tratamiento real (vía "Aplicación Masiva") cuando llegue la fecha.
+  Future<void> _showAssignPlanDialog() async {
+    final snap = await _plansRef.get();
+    final plans = snap.docs
+        .map((d) =>
+            SanitaryPlan.fromFirestore(d.data() as Map<String, dynamic>, d.id))
+        .toList();
+
+    if (plans.isEmpty) {
+      _showSnackBar('No tienes planes sanitarios creados todavía', Colors.red);
+      return;
+    }
+    if (!mounted) return;
+
+    final selectedPlan = await showDialog<SanitaryPlan>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Elige un plan sanitario'),
+        children: plans
+            .map((p) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, p),
+                  child: Text('${p.name} (${p.steps.length} pasos)'),
+                ))
+            .toList(),
+      ),
+    );
+
+    if (selectedPlan == null) return;
+
+    try {
+      final today = DateTime.now();
+      final selectedIds = _selectedAnimals.toList();
+      final animalsSnap = await _firestore
+          .collection('users')
+          .doc(_currentUser!.uid)
+          .collection('ranches')
+          .doc(_currentRanchId)
+          .collection('animals')
+          .get();
+      final namesById = {
+        for (final d in animalsSnap.docs)
+          d.id: (d.data())['name'] as String? ?? 'Animal'
+      };
+
+      WriteBatch batch = _firestore.batch();
+      for (final animalId in selectedIds) {
+        final animalName = namesById[animalId] ?? 'Animal';
+        for (final step in selectedPlan.steps) {
+          final eventRef = _firestore
+              .collection('users')
+              .doc(_currentUser!.uid)
+              .collection('ranches')
+              .doc(_currentRanchId)
+              .collection('calendarEvents')
+              .doc();
+          batch.set(eventRef, {
+            'title': '${step.type}: ${step.label} — $animalName',
+            'description': 'Paso del plan "${selectedPlan.name}"'
+                '${step.suggestedWithdrawalDays != null ? ' · Retiro sugerido: ${step.suggestedWithdrawalDays} días' : ''}',
+            'date': Timestamp.fromDate(
+                today.add(Duration(days: step.offsetDays))),
+            'category': 'Sanidad',
+            'animalId': animalId,
+          });
+        }
+      }
+      await batch.commit();
+
+      if (mounted) {
+        setState(() => _selectedAnimals.clear());
+        _showSnackBar(
+            'Plan "${selectedPlan.name}" asignado — recordatorios programados en el calendario.',
+            Colors.teal);
+      }
+    } catch (e) {
+      if (mounted) _showSnackBar('Error: $e', Colors.red);
+    }
   }
 
   Widget _buildSummaryStat(String label, String value,

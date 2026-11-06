@@ -77,7 +77,13 @@ service cloud.firestore {
     function calendarEventDataOk(data) {
       return strOk(data, 'title', 200)
           && strOk(data, 'description', 2000)
-          && strOk(data, 'category', 100);
+          && strOk(data, 'category', 100)
+          && strOk(data, 'animalId', 200);
+    }
+
+    function sanitaryPlanDataOk(data) {
+      return strOk(data, 'name', 150)
+          && listOk(data, 'steps', 200);
     }
 
     function listingDataOk(data) {
@@ -158,6 +164,13 @@ service cloud.firestore {
           allow create, update: if request.auth != null
                                 && request.auth.uid == userId
                                 && calendarEventDataOk(request.resource.data);
+        }
+        match /sanitaryPlans/{planId} {
+          allow read, delete: if request.auth != null
+                              && request.auth.uid == userId;
+          allow create, update: if request.auth != null
+                                && request.auth.uid == userId
+                                && sanitaryPlanDataOk(request.resource.data);
         }
       }
 
