@@ -3,7 +3,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide Border;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +11,76 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:manual_ganadero_flutter/models/animal.dart';
 import 'package:url_launcher/url_launcher.dart'; // <-- AGREGA ESTO
 import 'package:manual_ganadero_flutter/services/notification_service.dart';
+
+// Valores válidos — deben coincidir EXACTAMENTE con los de
+// register_animal_screen.dart / edit_animal_screen.dart / voice_action_dialog.dart.
+const _validSexes = ['Macho', 'Hembra'];
+const _validPurposes = ['Leche', 'Carne', 'Genética', 'Engorda', 'Reproductora'];
+const _validBreeds = [
+  'Nelore', 'Angus', 'Brangus', 'Brahman', 'Brahman Rojo', 'Hereford',
+  'Charolais', 'Simmental', 'Limousin', 'Holstein', 'Jersey', 'Suizo Pardo',
+  'Guzerat', 'Indubrasil', 'Beefmaster', 'Santa Gertrudis', 'Texas Longhorn',
+  'Cebú', 'Otro',
+];
+// Variantes/sinónimos habladas o mal escritas comunes -> valor canónico.
+// Se comparan ya sin acentos y en minúsculas (ver _normalize).
+const _breedAliases = {
+  'cebu': 'Cebú',
+  'indico': 'Cebú',
+  'indicu': 'Cebú',
+  'suizo': 'Suizo Pardo',
+  'pardo suizo': 'Suizo Pardo',
+  'holando': 'Holstein',
+  'holandes': 'Holstein',
+  'simental': 'Simmental',
+  'si mental': 'Simmental',
+  'limosin': 'Limousin',
+  'limozin': 'Limousin',
+  'beef master': 'Beefmaster',
+  'brahman colorado': 'Brahman Rojo',
+  'indu brasil': 'Indubrasil',
+  'angus negro': 'Angus',
+  'angus colorado': 'Angus',
+  'angus rojo': 'Angus',
+  'tejano': 'Texas Longhorn',
+  'cuernos largos': 'Texas Longhorn',
+  'criollo': 'Otro',
+  'mestizo': 'Otro',
+  'cruza': 'Otro',
+  'revuelto': 'Otro',
+};
+
+// Firestore solo permite ~1MiB por documento y 500 escrituras por batch —
+// un archivo corrupto o con decenas de miles de filas podría intentar
+// escribir cientos de miles de documentos de un jalón. Ningún rancho real
+// tiene esta cantidad de cabezas; este tope es solo una red de seguridad.
+const _maxImportRows = 5000;
+
+String _stripAccents(String s) {
+  const from = 'áéíóúÁÉÍÓÚñÑ';
+  const to = 'aeiouAEIOUnN';
+  var r = s;
+  for (int i = 0; i < from.length; i++) {
+    r = r.replaceAll(from[i], to[i]);
+  }
+  return r;
+}
+
+String _normalize(String s) => _stripAccents(s).trim().toLowerCase();
+
+/// Busca [raw] en [canonical] (sin importar acentos/mayúsculas) y, si no
+/// coincide, en [aliases]. Devuelve el valor canónico exacto, o null si no
+/// hay ninguna coincidencia razonable.
+String? _matchCanonical(String? raw, List<String> canonical,
+    [Map<String, String>? aliases]) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  final norm = _normalize(raw);
+  for (final c in canonical) {
+    if (_normalize(c) == norm) return c;
+  }
+  if (aliases != null && aliases.containsKey(norm)) return aliases[norm];
+  return null;
+}
 
 class ImportAnimalsScreen extends StatefulWidget {
   const ImportAnimalsScreen({super.key});
@@ -26,6 +96,12 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
   List<Animal> _previewAnimals = [];
   bool _isLoading = false;
   String _statusMessage = 'Sube tu plantilla de Excel (.xlsx) para comenzar.';
+  // Filas con un problema que impidió importarlas (ej. arete duplicado,
+  // sexo no reconocido) — se muestran para que el usuario pueda corregir
+  // su archivo, en vez de fallar en silencio o importar datos incorrectos.
+  List<String> _rowErrors = [];
+  // Avisos no bloqueantes (ej. raza no reconocida -> se usó "Otro").
+  List<String> _rowWarnings = [];
 
   // ─── Extractores robustos de celdas (excel 4.x) ───────────────────────────
   // En excel 4.x cada celda es un CellValue tipado. Clave: TextCellValue.value
@@ -108,21 +184,62 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
         setState(() {
           _isLoading = true;
           _statusMessage = 'Leyendo archivo...';
+          _rowErrors = [];
+          _rowWarnings = [];
         });
+
+        // Aretes ya existentes en el rancho actual — para detectar
+        // duplicados contra animales ya registrados, no solo dentro del
+        // mismo archivo.
+        final Set<String> existingEarTags = {};
+        final user = _auth.currentUser;
+        if (user != null) {
+          final userDoc =
+              await _firestore.collection('users').doc(user.uid).get();
+          final ranchId = userDoc.data()?['currentRanchId'];
+          if (ranchId != null) {
+            final existingSnap = await _firestore
+                .collection('users')
+                .doc(user.uid)
+                .collection('ranches')
+                .doc(ranchId)
+                .collection('animals')
+                .get();
+            for (final d in existingSnap.docs) {
+              final tag = (d.data()['earTagNumber'] as String?)?.trim();
+              if (tag != null && tag.isNotEmpty) existingEarTags.add(tag);
+            }
+          }
+        }
 
         File file = File(result.files.single.path!);
         var bytes = file.readAsBytesSync();
         var excel = Excel.decodeBytes(bytes);
 
         List<Animal> parsedAnimals = [];
+        final List<String> errors = [];
+        final List<String> warnings = [];
+        final Set<String> seenInFile = {};
 
         // Asumimos que los datos están en la primera pestaña (hoja) del Excel
         String sheetName = excel.tables.keys.first;
         var table = excel.tables[sheetName]!;
 
+        int totalRows = table.maxRows - 1; // sin contar encabezado
+        if (totalRows > _maxImportRows) {
+          setState(() {
+            _isLoading = false;
+            _statusMessage = 'El archivo tiene $totalRows filas — el máximo '
+                'por importación es $_maxImportRows. Divide tu archivo en '
+                'partes más pequeñas.';
+          });
+          return;
+        }
+
         // Empezamos desde la fila 1 (saltando la fila 0 que son los encabezados)
         for (int i = 1; i < table.maxRows; i++) {
           var row = table.rows[i];
+          final int excelRowNum = i + 1; // para mensajes legibles al usuario
 
           // Acceso seguro a una celda por índice (respeta filas cortas).
           dynamic cell(int idx) => idx < row.length ? row[idx] : null;
@@ -131,13 +248,47 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
           final String? earTagRaw = _cellText(cell(1));
           if (earTagRaw == null) continue;
 
+          final String earTag = earTagRaw.trim();
+
+          // ── Duplicados: dentro del mismo archivo o contra el rancho ──
+          if (seenInFile.contains(earTag)) {
+            errors.add('Fila $excelRowNum: arete "$earTag" repetido en este '
+                'mismo archivo — se omitió esta fila.');
+            continue;
+          }
+          if (existingEarTags.contains(earTag)) {
+            errors.add('Fila $excelRowNum: ya existe un animal con el arete '
+                '"$earTag" en tu rancho — se omitió esta fila.');
+            continue;
+          }
+
           // Mapeo exacto a las 18 columnas de tu plantilla
-          final String earTag = earTagRaw;
           final String name = _cellText(cell(0)) ?? 'Sin nombre';
           final String? legNumber = _cellText(cell(2));
-          final String breed = _cellText(cell(3)) ?? 'Otro';
-          final String sex = _cellText(cell(4)) ?? 'Hembra';
-          final String purpose = _cellText(cell(5)) ?? 'Carne';
+
+          final String? breedRaw = _cellText(cell(3));
+          String breed = _matchCanonical(breedRaw, _validBreeds, _breedAliases) ??
+              'Otro';
+          if (breedRaw != null && breed == 'Otro' && breedRaw != 'Otro') {
+            warnings.add('Fila $excelRowNum: raza "$breedRaw" no reconocida, '
+                'se guardó como "Otro".');
+          }
+
+          final String? sexRaw = _cellText(cell(4));
+          final String? sexMatch = _matchCanonical(sexRaw, _validSexes);
+          if (sexMatch == null) {
+            errors.add('Fila $excelRowNum: "Sexo" debe ser Macho o Hembra '
+                '(se encontró "${sexRaw ?? "vacío"}") — se omitió esta fila.');
+            continue;
+          }
+          final String sex = sexMatch;
+
+          final String? purposeRaw = _cellText(cell(5));
+          String purpose = _matchCanonical(purposeRaw, _validPurposes) ?? 'Carne';
+          if (purposeRaw != null && !_validPurposes.contains(purpose)) {
+            warnings.add('Fila $excelRowNum: propósito "$purposeRaw" no '
+                'reconocido, se guardó como "Carne".');
+          }
 
           final DateTime? birthDate = _cellDate(cell(6));
           final String? regNumber = _cellText(cell(7));
@@ -151,7 +302,7 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
           // Lógica de Preñez (Solo si es hembra)
           bool isPregnant = false;
           DateTime? pregDate;
-          if (sex.toLowerCase() == 'hembra') {
+          if (sex == 'Hembra') {
             final String pregStr = (_cellText(cell(12)) ?? 'no').toLowerCase();
             isPregnant = (pregStr == 'sí' ||
                 pregStr == 'si' ||
@@ -194,14 +345,20 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
               stats: [],
               location: 'N/A');
 
+          seenInFile.add(earTag);
           parsedAnimals.add(newAnimal);
         }
 
         setState(() {
           _previewAnimals = parsedAnimals;
+          _rowErrors = errors;
+          _rowWarnings = warnings;
           _isLoading = false;
-          _statusMessage =
-              'Se encontraron ${parsedAnimals.length} animales listos para importar.';
+          _statusMessage = errors.isEmpty
+              ? 'Se encontraron ${parsedAnimals.length} animales listos para importar.'
+              : 'Se encontraron ${parsedAnimals.length} animales listos para '
+                  'importar. ${errors.length} fila(s) se omitieron por '
+                  'errores — revísalas abajo.';
         });
       }
     } catch (e) {
@@ -411,6 +568,62 @@ class _ImportAnimalsScreenState extends State<ImportAnimalsScreen> {
               ),
             ),
             const SizedBox(height: 20),
+
+            // Filas omitidas por error (arete duplicado, sexo no válido) —
+            // se muestran siempre que existan, incluso si el resto del
+            // archivo sí se pudo importar.
+            if (_rowErrors.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.shade200)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_rowErrors.length} fila(s) omitidas:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade700)),
+                    const SizedBox(height: 6),
+                    ..._rowErrors.map((e) => Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Text('• $e',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.red.shade700)),
+                        )),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (_rowWarnings.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange.shade200)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_rowWarnings.length} aviso(s):',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade800)),
+                    const SizedBox(height: 6),
+                    ..._rowWarnings.map((w) => Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Text('• $w',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.orange.shade800)),
+                        )),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
 
             // Previsualización de los Animales leídos
             if (_previewAnimals.isNotEmpty) ...[
